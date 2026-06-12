@@ -1,0 +1,190 @@
+# Proyecto Final ML - Orden de trabajo e ideas de graficos
+
+# 1. Antes de preprocesar
+Objetivo: entender como viene el dataset y detectar problemas de calidad.
+
+- Ver frecuencias de categorias:
+  Marca, Modelo, Color, Tipo de combustible, Transmision, Moneda y Tipo de vendedor.
+
+- Ver valores faltantes por columna:
+  Identificar que columnas tienen muchos nulos y decidir despues si se imputan,
+  se agrupan como "Unknown" o se eliminan.
+
+- Ver distribucion de Precio separada por Moneda:
+  No se pueden mezclar precios en pesos y dolares directamente.
+
+- Ver cantidad de publicaciones por Moneda:
+  Entender cuantos autos estan en pesos y cuantos en dolares.
+
+- Ver distribucion raw de variables numericas:
+  Año, Puertas, Kilometros y Precio.
+  Esto ayuda a detectar columnas mal tipeadas o valores raros.
+
+- Detectar outliers preliminares:
+  Boxplots simples de Precio, Año y Kilometros antes de limpiar.
+
+
+# 2. Preprocesamiento antes del analisis principal
+Objetivo: dejar los datos comparables y listos para sacar conclusiones.
+
+- Eliminar o ignorar columnas de indice como "Unnamed: 0".
+
+- Separar el label:
+  target = Precio.
+
+- Revisar Moneda:
+  convertir todos los precios a una misma moneda.
+
+- Convertir variables a numericas:
+  Precio, Año, Puertas y Kilometros.
+
+- Crear nuevas variables:
+  age = 2026 - Año.
+
+- Limpiar categorias:
+  Normalizar Marca, Modelo, Color, Transmision, Combustible y Tipo de vendedor.
+
+- Revisar si los nulos de "Con camara de retroceso" tienen relacion con el Año:
+  Puede pasar que autos mas viejos no tengan ese dato cargado.
+
+- Mirar histogramas de variables importantes:
+  Evaluar si aplicar logaritmo ayuda a obtener distribuciones mas parecidas a una gaussiana.
+
+- Tratar valores faltantes:
+  Si falta Precio, eliminar la fila.
+  Si faltan categoricas, imputar como "Unknown" o evaluar si conviene eliminar.
+  Si faltan numericas, imputar despues del train/test split si se usan para modelado.
+
+- Tratar outliers:
+  Primero revisar si son errores reales o autos premium.
+  Eliminar solo valores imposibles o claramente mal cargados.
+  Considerar usar log(Precio) para reducir el impacto de valores extremos.
+  Decidir que hacer con outliers que no tienen sentido.
+
+
+# 3. Despues de preprocesar
+Objetivo: analizar relaciones reales entre features y Precio.
+
+- Distribucion de Precio limpio.
+
+- Distribucion de log(Precio):
+  Sirve si Precio esta muy sesgado hacia valores altos.
+
+- Distribucion de variables numericas limpias:
+  Año, age, Kilometros y Puertas.
+
+- Precio vs Año:
+  Ver si los autos mas nuevos son mas caros.
+
+- Precio vs age:
+  Analizar depreciacion segun años de uso.
+
+- Precio vs Kilometros:
+  Ver el efecto del uso sobre el precio.
+
+- Scatter de Año vs Kilometros coloreado por Precio:
+  Grafico clave para ver estado del auto y precio al mismo tiempo.
+
+- Precio por Marca:
+  Boxplot o barplot de precio mediano por marca.
+
+- Precio por Modelo:
+  Usar solo modelos frecuentes, con suficiente cantidad de observaciones.
+
+- Precio por Color:
+  Boxplot de Precio por Color.
+  Barplot de precio mediano por Color.
+
+- Precio por Transmision, Combustible y Tipo de vendedor:
+  Comparar medianas y dispersion por categoria.
+
+- Frecuencias de categorias limpias:
+  Ver categorias dominantes y categorias raras.
+
+- Correlacion numerica:
+  Heatmap entre Precio, log(Precio), age, Año, Kilometros y Puertas.
+
+- Heatmap de precio mediano por Marca y Año:
+  Grafico de mayor nivel para ver marca y antiguedad juntas.
+
+- Lineas de precio mediano por age para marcas frecuentes:
+  Sirve para analizar depreciacion por marca.
+
+- Lineas de precio mediano por age para modelos frecuentes:
+  Sirve para ver que modelos mantienen mejor valor.
+
+- Boxplot de precios por Marca:
+  Ver dispersion general de precios por marca.
+
+- Ranking de IQR por Marca:
+  Identificar marcas con mayor o menor dispersion de precios.
+
+
+# 4. Graficos avanzados despues de preparar features
+Objetivo: entender la estructura global del dataset.
+
+- PCA a 2D:
+  Proyectar autos en dos dimensiones usando features numericas y categoricas codificadas.
+  Colorear por Precio o log(Precio).
+
+- UMAP a 2D:
+  Similar a PCA, pero puede capturar relaciones no lineales.
+
+- Scatter PCA/UMAP coloreado por:
+  Precio, Marca, age o Tipo de vendedor.
+
+
+# 5. Despues de entrenar modelos
+Objetivo: responder preguntas ajustadas por las caracteristicas del auto.
+
+- Precio real vs Precio predicho:
+  Evaluar si el modelo estima bien el precio esperado.
+
+- Distribucion de residuos:
+  Ver errores del modelo y detectar sesgos.
+
+- Autos subvaluados:
+  Entrenar un modelo que estime precio esperado.
+  Calcular:
+  subvaluation_% = (predicted_price - actual_price) / predicted_price.
+
+- Ranking de autos mas subvaluados:
+  Listar autos con mayor subvaluation_% positiva.
+
+- Barplot de efecto ajustado del Color:
+  Comparar colores controlando por marca, modelo, año, kilometros y otras variables.
+
+- Diferencia ajustada por Tipo de vendedor:
+  Estimar si comprar a privado es mas barato que a concesionaria/tienda,
+  controlando por caracteristicas.
+
+- Ranking de menor caida porcentual anual:
+  Identificar marcas/modelos que mantienen mejor su valor en el tiempo.
+
+- Ranking de desviacion de residuos por Marca:
+  Medir que marcas tienen precios mas consistentes despues de controlar caracteristicas.
+
+
+# 6. Preguntas de la consigna y donde se responden
+
+1. Efecto de años de uso y kilometraje sobre precio:
+   Usar Precio vs age, Precio vs Kilometros y modelos ajustados.
+
+2. Ranking de colores segun precio:
+   Primero ranking simple por precio mediano.
+   Luego efecto ajustado del color con modelo.
+
+3. Autos subvaluados:
+   Requiere modelo predictivo.
+   Usar precio predicho vs precio real y subvaluation_%.
+
+4. Marca y modelo que mantiene mas valor:
+   Usar lineas de precio mediano por age y ranking de caida porcentual anual.
+
+5. Privado vs concesionaria/tienda:
+   Primero boxplot simple por Tipo de vendedor.
+   Luego diferencia ajustada con modelo.
+
+6. Marca con menor dispersion de precios:
+   Primero ranking de IQR por Marca.
+   Luego ranking de desviacion de residuos por Marca.
