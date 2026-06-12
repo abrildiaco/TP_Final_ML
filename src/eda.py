@@ -1,6 +1,53 @@
 import numpy as np
 import pandas as pd
 
+def explore_target(y, currency=None):
+    """
+    Builds an exploratory summary of the target variable.
+
+    Arguments:
+        y (pd.Series): target variable
+        currency (pd.Series | None): currency values aligned with the target
+
+    Returns:
+        pd.DataFrame: target summary overall and, if provided, by currency
+    """
+    rows = []
+
+    target = pd.to_numeric(y, errors="coerce")
+
+    if currency is None:
+        groups = [("All", target)]
+    else:
+        target_with_currency = pd.DataFrame({
+            "target": target,
+            "currency": currency
+        })
+
+        groups = [("All", target_with_currency["target"])]
+
+        for currency_value, group_df in target_with_currency.groupby("currency", dropna=False):
+            groups.append((currency_value, group_df["target"]))
+
+    for group_name, group_target in groups:
+        non_missing = group_target.dropna()
+
+        rows.append({
+            "group": group_name,
+            "count": group_target.count(),
+            "missing": group_target.isna().sum(),
+            "missing_%": round(group_target.isna().mean() * 100, 2),
+            "min": non_missing.min() if len(non_missing) else np.nan,
+            "q1": non_missing.quantile(0.25) if len(non_missing) else np.nan,
+            "median": non_missing.median() if len(non_missing) else np.nan,
+            "mean": non_missing.mean() if len(non_missing) else np.nan,
+            "q3": non_missing.quantile(0.75) if len(non_missing) else np.nan,
+            "max": non_missing.max() if len(non_missing) else np.nan,
+            "std": non_missing.std() if len(non_missing) else np.nan,
+            "zero_count": (group_target == 0).sum(),
+        })
+
+    return pd.DataFrame(rows)
 
 def _format_value_counts(value_counts, max_items):
     """
