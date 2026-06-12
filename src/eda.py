@@ -1,21 +1,43 @@
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 
 
-def explore_features(df, compact=True):
+def _format_value_counts(value_counts, max_items):
     """
-    Builds a feature-level exploratory summary for a DataFrame.
+    Formats category counts into a readable string.
+
+    Arguments:
+        value_counts (pd.Series): category counts sorted by frequency
+        max_items (int): maximum number of categories to show
+
+    Returns:
+        str: formatted category counts
+    """
+    if value_counts.empty:
+        return np.nan
+
+    shown_values = value_counts.head(max_items)
+
+    return " | ".join(
+        f"{category}: {count}"
+        for category, count in shown_values.items()
+    )
+
+
+def explore_features(df, top_n_categories=5, rare_threshold=1):
+    """
+    Builds separate exploratory summaries for numeric and categorical features.
 
     Arguments:
         df (pd.DataFrame): dataset to summarize column by column
-        compact (bool): whether to return a smaller notebook-friendly summary
+        top_n_categories (int): number of categories to show in preview columns
+        rare_threshold (int): maximum frequency used to count rare categories
 
     Returns:
-        pd.DataFrame: summary with missing values, unique values, descriptive
-        statistics, frequent values, and example observations
+        dict[str, pd.DataFrame]: numeric and categorical feature summaries
     """
-    rows = []
+    numeric_rows = []
+    categorical_rows = []
     row_count = len(df)
 
     # Ignore CSV-generated index columns such as "Unnamed: 0".
@@ -27,85 +49,107 @@ def explore_features(df, compact=True):
     for column in columns:
         series = df[column]
         non_missing = series.dropna()
-        value_counts = series.value_counts(dropna=True)
-
-        is_numeric = pd.api.types.is_numeric_dtype(series)
+        missing_count = series.isna().sum()
         unique_count = series.nunique(dropna=True)
 
-        # Base information useful for every type of feature.
-        row = {
+        base_row = {
             "feature": column,
             "dtype": str(series.dtype),
-            "missing": series.isna().sum(),
-            "missing_%": round(series.isna().mean() * 100, 2),
+            "non_missing": series.count(),
+            "missing": missing_count,
+            "missing_%": round(missing_count / row_count * 100, 2) if row_count else np.nan,
             "unique": unique_count,
             "unique_%": round(unique_count / row_count * 100, 2) if row_count else np.nan,
-            "most_frequent": value_counts.index[0] if not value_counts.empty else np.nan,
-            "most_frequent_count": value_counts.iloc[0] if not value_counts.empty else np.nan,
         }
 
-        if is_numeric:
-            # Numeric features get distribution statistics.
-            row.update({
+        if pd.api.types.is_numeric_dtype(series):
+            # Numeric features get range, center, dispersion, and outlier checks.
+            q1 = non_missing.quantile(0.25) if len(non_missing) else np.nan
+            q3 = non_missing.quantile(0.75) if len(non_missing) else np.nan
+            iqr = q3 - q1 if len(non_missing) else np.nan
+
+            lower_bound = q1 - 1.5 * iqr if len(non_missing) else np.nan
+            upper_bound = q3 + 1.5 * iqr if len(non_missing) else np.nan
+
+            outlier_mask = (
+                (series < lower_bound) | (series > upper_bound)
+                if len(non_missing)
+                else pd.Series(False, index=series.index)
+            )
+
+            numeric_rows.append({
+                **base_row,
                 "min": non_missing.min() if len(non_missing) else np.nan,
-                "q1": non_missing.quantile(0.25) if len(non_missing) else np.nan,
-                "median": non_missing.median() if len(non_missing) else np.nan,
-                "mean": non_missing.mean() if len(non_missing) else np.nan,
-                "q3": non_missing.quantile(0.75) if len(non_missing) else np.nan,
                 "max": non_missing.max() if len(non_missing) else np.nan,
+                "mean": non_missing.mean() if len(non_missing) else np.nan,
+                "median": non_missing.median() if len(non_missing) else np.nan,
                 "std": non_missing.std() if len(non_missing) else np.nan,
+                "q1": q1,
+                "q3": q3,
                 "zero_count": (series == 0).sum(),
+                "outlier_count": outlier_mask.sum(),
+                "outlier_%": round(outlier_mask.mean() * 100, 2),
             })
+
         else:
-            # Categorical/text features keep examples instead of numeric stats.
-            row.update({
-                "min": np.nan,
-                "median": np.nan,
-                "mean": np.nan,
-                "max": np.nan,
-                "std": np.nan,
-                "zero_count": np.nan,
-                "examples": ", ".join(non_missing.astype(str).head(3)),
+            value_counts = series.value_counts(dropna=True)
+            least_frequent = value_counts.tail(top_n_categories).sort_values()
+
+            # Categorical features get category previews and frequency summaries.
+            categorical_rows.append({
+                **base_row,
+                "categories_preview": _format_value_counts(value_counts, top_n_categories),
+                "most_frequent": value_counts.index[0] if not value_counts.empty else np.nan,
+                "most_frequent_count": value_counts.iloc[0] if not value_counts.empty else np.nan,
+                "most_frequent_%": (
+                    round(value_counts.iloc[0] / row_count * 100, 2)
+                    if row_count and not value_counts.empty
+                    else np.nan
+                ),
+                "least_frequent_preview": _format_value_counts(least_frequent, top_n_categories),
+                "rare_categories": (value_counts <= rare_threshold).sum(),
             })
 
-        rows.append(row)
-
-    summary = pd.DataFrame(rows)
-
-    compact_columns = [
+    numeric_columns = [
         "feature",
         "dtype",
+        "non_missing",
         "missing",
         "missing_%",
-        "unique",
-        "most_frequent",
         "min",
-        "median",
-        "mean",
         "max",
-    ]
-
-    full_columns = [
-        "feature",
-        "dtype",
-        "missing",
-        "missing_%",
+        "mean",
+        "median",
+        "std",
+        "q1",
+        "q3",
+        "zero_count",
+        "outlier_count",
+        "outlier_%",
         "unique",
         "unique_%",
-        "min",
-        "q1",
-        "median",
-        "mean",
-        "q3",
-        "max",
-        "std",
-        "zero_count",
-        "most_frequent",
-        "most_frequent_count",
-        "examples",
     ]
 
-    selected_columns = compact_columns if compact else full_columns
-    selected_columns = [column for column in selected_columns if column in summary.columns]
+    categorical_columns = [
+        "feature",
+        "dtype",
+        "categories_preview",
+        "most_frequent",
+        "most_frequent_count",
+        "most_frequent_%",
+        "least_frequent_preview",
+        "rare_categories",
+        "missing",
+        "missing_%",
+        "non_missing",
+        "unique",
+        "unique_%",
+    ]
 
-    return summary[selected_columns]
+    numeric_summary = pd.DataFrame(numeric_rows)
+    categorical_summary = pd.DataFrame(categorical_rows)
+
+    return {
+        "numeric": numeric_summary.reindex(columns=numeric_columns),
+        "categorical": categorical_summary.reindex(columns=categorical_columns),
+    }
