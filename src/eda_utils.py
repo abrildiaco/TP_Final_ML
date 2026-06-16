@@ -239,24 +239,125 @@ def missing_values_summary(df):
     return summary
 
 
-def data_quality_summary(df):
-    """ Returns a summary of the dataset quality """
+def unique_values_summary(df):
+    """Returns the number and percentage of unique values per column."""
 
     summary = pd.DataFrame({
         "column": df.columns,
-        "dtype": df.dtypes.astype(str).values,
-        "non_null": df.notna().sum().values,
-        "missing": df.isna().sum().values,
-        "missing_pct": (df.isna().mean().values * 100).round(2),
         "unique_values": df.nunique(dropna=True).values,
         "unique_pct": (
             df.nunique(dropna=True).values / len(df) * 100
         ).round(2)
     })
 
-    return summary.sort_values("missing_pct", ascending=False)
+    return summary.sort_values(
+        "unique_values",
+        ascending=False
+    )
 
 
 def get_constant_columns(df):
-    """ Returns columns containing only one unique value """
-    return [col for col in df.columns if df[col].nunique(dropna=True) <= 1]
+    """ Returns constant columns and their unique value """
+
+    constant_columns = []
+
+    for col in df.columns:
+        unique_values = df[col].dropna().unique()
+
+        if len(unique_values) <= 1:
+            constant_columns.append({
+                "column": col,
+                "unique_value": unique_values[0] if len(unique_values) == 1 else None
+            })
+
+    return pd.DataFrame(constant_columns)
+
+
+def drop_irrelevant_columns(df, columns_to_drop):
+    """ Removes columns that do not provide useful information for the analysis or model """
+    df = df.copy()
+    return df.drop(columns=columns_to_drop, errors="ignore")
+
+
+def remove_invalid_values(df, year_col="Año", doors_col="Puertas", max_year=2025, max_doors=5):
+    """ Removes rows with invalid year or door values based on predefined limits """
+    df = df.copy()
+    df = df[df[year_col] <= max_year]
+    df = df[df[doors_col] <= max_doors]
+    return df
+
+
+def convert_peso_prices_to_usd(df, price_col="Precio", currency_col="Moneda", peso_symbol="$", exchange_rate=(895.25 + 913) / 2, copy=True,):
+    """
+    Converts prices in Argentine pesos to USD and removes the currency column.
+
+    Arguments:
+        df (pd.DataFrame): dataset with price and currency columns
+        price_col (str): price column name
+        currency_col (str): currency column name
+        peso_symbol (str): value used to identify Argentine pesos
+        exchange_rate (float): ARS/USD rate used for conversion
+        copy (bool): whether to return a copy instead of modifying df in place
+
+    Returns:
+        pd.DataFrame: dataset with peso prices converted to USD and without currency_col
+    """
+    data = df.copy() if copy else df
+
+    peso_mask = data[currency_col].eq(peso_symbol)
+    data[price_col] = pd.to_numeric(data[price_col], errors="coerce")
+    data.loc[peso_mask, price_col] = data.loc[peso_mask, price_col] / exchange_rate
+
+    return data.drop(columns=[currency_col])
+
+
+def encode_camera_retroceso(df, col="Con cámara de retroceso"):
+    data = df.copy()
+
+    data[col] = (
+        data[col]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .map({"sí": 1, "si": 1, "no": 0})
+    )
+
+    return data
+
+
+def one_hot_encoding(df, categorical_cols = ["escuela", "semestre"], train = True, categories_map = None):
+    """
+    Applies one-hot encoding to categorical columns.
+
+    Arguments:
+        df (pd.DataFrame): dataset to encode
+        categorical_cols (list[str]): categorical columns to encode
+        train (bool): whether the dataset is a training set
+        categories_map (dict): categories learned from the training set
+
+    Returns:
+        pd.DataFrame: one-hot encoded dataset
+        dict: [only if train=True] categories used for encoding
+    """
+    # During training, learn the categories and create new columns for each category
+    if train:
+        categories_map = {}
+
+        for col in categorical_cols:
+            categories_map[col] = sorted(df[col].dropna().unique())
+
+            for category in categories_map[col]:
+                df[f"{col}{category}"] = (df[col] == category).astype(int)
+
+            df = df.drop(col, axis=1)
+
+        return df, categories_map
+
+    # During validation/test, use the learned categories to create the same columns, filling with 0 for unseen categories
+    for col in categorical_cols:
+        for category in categories_map[col]:
+            df[f"{col}{category}"] = (df[col] == category).astype(int)
+
+        df = df.drop(col, axis=1)
+
+    return df

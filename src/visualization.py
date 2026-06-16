@@ -2,7 +2,7 @@ import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from eda_utils import missing_values_summary
+from eda_utils import missing_values_summary, unique_values_summary
 
 
 FORMAL_COLORS = {
@@ -66,7 +66,14 @@ def plot_missing_values(data, top_n=None, title="Valores faltantes por columna")
 
 
 def plot_currency_counts(data, currency_col="Moneda", title="Cantidad de publicaciones por moneda"):
-    """ Plots the number of listings by currency """
+    """
+    Plots the number of listings by currency.
+
+    Arguments:
+        data (pd.DataFrame): dataset to analyze
+        currency_col (str): currency column name
+        title (str): plot title
+    """
 
     currency_counts = data[currency_col].value_counts(dropna=False)
 
@@ -82,12 +89,8 @@ def plot_currency_counts(data, currency_col="Moneda", title="Cantidad de publica
     ax.set_xlabel("Moneda")
     ax.set_ylabel("Cantidad de publicaciones")
     ax.grid(axis="y", alpha=0.25)
-
     plt.tight_layout()
     plt.show()
-
-    return currency_counts
-
 
 def plot_price_distribution_by_currency(data, price_col="Precio", currency_col="Moneda", bins=40, title="Distribución de precio por moneda"):
     """
@@ -254,24 +257,9 @@ def plot_unique_values(data, top_n=None, title="Unique values by column"):
         data (pd.DataFrame): dataset to analyze
         top_n (int | None): number of columns to show
         title (str): plot title
-
-    Returns:
-        pd.DataFrame: table with unique counts and percentages
     """
 
-    unique_count = data.nunique(dropna=True)
-    unique_percentage = unique_count / len(data) * 100
-
-    unique_table = pd.DataFrame({
-        "column": unique_count.index,
-        "unique_count": unique_count.values,
-        "unique_percentage": unique_percentage.values
-    })
-
-    unique_table = unique_table.sort_values(
-        "unique_count",
-        ascending=False
-    )
+    unique_table = unique_values_summary(data)
 
     if top_n is not None:
         unique_table = unique_table.head(top_n)
@@ -282,13 +270,13 @@ def plot_unique_values(data, top_n=None, title="Unique values by column"):
 
     bars = ax.barh(
         unique_table["column"],
-        unique_table["unique_count"],
+        unique_table["unique_values"],
         color=FORMAL_COLORS["teal"]
     )
 
     ax.invert_yaxis()
 
-    for bar, value in zip(bars, unique_table["unique_count"]):
+    for bar, value in zip(bars, unique_table["unique_values"]):
         ax.text(
             value,
             bar.get_y() + bar.get_height() / 2,
@@ -305,5 +293,70 @@ def plot_unique_values(data, top_n=None, title="Unique values by column"):
     plt.tight_layout()
     plt.show()
 
-    return unique_table
 
+def plot_camera_missing_by_year(df, year_col="Año", camera_col="Con cámara de retroceso", title="Nulos de cámara de retroceso por año",):
+    """
+    Plots missing camera information by vehicle year.
+
+    Arguments:
+        df (pd.DataFrame): dataset to analyze
+        year_col (str): year column name
+        camera_col (str): rear camera column name
+        title (str): plot title
+
+    Returns:
+        pd.DataFrame: missing summary by year
+    """
+    plot_data = df[[year_col, camera_col]].copy()
+    plot_data[year_col] = pd.to_numeric(plot_data[year_col], errors="coerce")
+    plot_data = plot_data.dropna(subset=[year_col])
+    plot_data[year_col] = plot_data[year_col].astype(int)
+    plot_data["camera_missing"] = plot_data[camera_col].isna()
+
+    summary = (
+        plot_data
+        .groupby(year_col)
+        .agg(
+            total=(camera_col, "size"),
+            missing=("camera_missing", "sum"),
+            missing_pct=("camera_missing", "mean"),
+        )
+        .reset_index()
+        .sort_values(year_col)
+    )
+    summary["missing_pct"] = summary["missing_pct"] * 100
+
+    fig, ax_count = plt.subplots(figsize=(12, 5))
+
+    ax_count.bar(
+        summary[year_col],
+        summary["total"],
+        color=FORMAL_COLORS["light_gray"],
+        edgecolor=FORMAL_COLORS["gray"],
+        label="Cantidad de autos",
+    )
+    ax_count.set_xlabel(year_col)
+    ax_count.set_ylabel("Cantidad de autos")
+
+    ax_missing = ax_count.twinx()
+    ax_missing.plot(
+        summary[year_col],
+        summary["missing_pct"],
+        color=FORMAL_COLORS["red"],
+        marker="o",
+        linewidth=2,
+        label="% nulos",
+    )
+    ax_missing.set_ylabel("% nulos en cámara de retroceso")
+    ax_missing.set_ylim(0, max(100, summary["missing_pct"].max() * 1.1))
+
+    lines_1, labels_1 = ax_count.get_legend_handles_labels()
+    lines_2, labels_2 = ax_missing.get_legend_handles_labels()
+    ax_count.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper left")
+
+    ax_count.set_title(title, fontweight="bold")
+    ax_count.grid(axis="y", alpha=0.25)
+    plt.tight_layout()
+    plt.show()
+
+    return summary

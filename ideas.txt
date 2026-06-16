@@ -6,37 +6,39 @@ Objetivo: entender como viene el dataset y detectar problemas de calidad.
 - Ver frecuencias de categorias:
   Marca, Modelo, Color, Tipo de combustible, Transmision, Moneda y Tipo de vendedor.
 
-- Ver valores faltantes por columna:
+- Ver valores faltantes por columna: 👍
   Identificar que columnas tienen muchos nulos y decidir despues si se imputan,
   se agrupan como "Unknown" o se eliminan.
 
-- Ver distribucion de Precio separada por Moneda:
+- Ver distribucion de Precio separada por Moneda: 👍
   No se pueden mezclar precios en pesos y dolares directamente.
 
-- Ver cantidad de publicaciones por Moneda:
+- Ver cantidad de publicaciones por Moneda: 👍
   Entender cuantos autos estan en pesos y cuantos en dolares.
 
-- Ver distribucion raw de variables numericas:
+- Ver distribucion raw de variables numericas: 👍
   Año, Puertas, Kilometros y Precio.
   Esto ayuda a detectar columnas mal tipeadas o valores raros.
 
-- Detectar outliers preliminares:
+- Detectar outliers preliminares: 👍
   Boxplots simples de Precio, Año y Kilometros antes de limpiar.
 
 
 # 2. Preprocesamiento antes del analisis principal
 Objetivo: dejar los datos comparables y listos para sacar conclusiones.
 
-- Eliminar o ignorar columnas de indice como "Unnamed: 0".
+- Eliminar o ignorar columnas de indice como "Unnamed: 0".👍
 
-- Separar el label:
+- Separar el label: 👍
   target = Precio.
 
-- Revisar Moneda:
+- Revisar Moneda: 👍
   convertir todos los precios a una misma moneda.
 
 - Convertir variables a numericas:
   Precio, Año, Puertas y Kilometros.
+
+  -> Tipo de vendedor, Marca, Color, Tipo de Combiustible con ONE-HOT
 
 - Crear nuevas variables:
   age = 2026 - Año.
