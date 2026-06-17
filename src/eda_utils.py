@@ -3,14 +3,6 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-FORMAL_COLORS = {
-    "blue": "#1F4E79",
-    "teal": "#2A9D8F",
-    "gold": "#C99700",
-    "red": "#A23E48",
-    "gray": "#6C757D",
-    "light_gray": "#E9ECEF"
-}
 
 def explore_target(y, currency=None):
     """

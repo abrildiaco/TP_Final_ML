@@ -8,7 +8,7 @@ from eda_utils import missing_values_summary, unique_values_summary
 FORMAL_COLORS = {
     "blue": "#1F4E79",
     "teal": "#2A9D8F",
-    "gold": "#C99700",
+    "gold": "#77547E",
     "red": "#A23E48",
     "gray": "#6C757D",
     "light_gray": "#E9ECEF"
@@ -271,7 +271,7 @@ def plot_unique_values(data, top_n=None, title="Unique values by column"):
     bars = ax.barh(
         unique_table["column"],
         unique_table["unique_values"],
-        color=FORMAL_COLORS["teal"]
+        color=FORMAL_COLORS["red"]
     )
 
     ax.invert_yaxis()
@@ -295,6 +295,7 @@ def plot_unique_values(data, top_n=None, title="Unique values by column"):
 
 
 def plot_camera_missing_by_year(df, year_col="Año", camera_col="Con cámara de retroceso", title="Nulos de cámara de retroceso por año",):
+
     """
     Plots missing camera information by vehicle year.
 
@@ -360,3 +361,79 @@ def plot_camera_missing_by_year(df, year_col="Año", camera_col="Con cámara de 
     plt.show()
 
     return summary
+
+
+
+def plot_categorical_counts(df, categorical_columns=None, ignored_columns=None, top_n=10, n_cols=2, figsize_per_plot=(7, 4),):
+    """
+    Plots category counts for categorical features in a single figure.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing categorical features
+        categorical_columns (list[str] | None): categorical columns to plot
+        ignored_columns (list[str] | None): columns to exclude from the plot
+        top_n (int): maximum number of categories shown per feature
+        n_cols (int): number of subplot columns in the figure
+        figsize_per_plot (tuple[int, int]): size multiplier for each subplot
+
+    Returns:
+        tuple[plt.Figure, np.ndarray]: figure and axes used for the plots
+    """
+    ignored_columns = ignored_columns or []
+
+    if categorical_columns is None:
+        categorical_columns = df.select_dtypes(
+            include=["object", "category", "bool"]
+        ).columns.tolist()
+
+    categorical_columns = [
+        column for column in categorical_columns
+        if column not in ignored_columns and not column.startswith("Unnamed:")
+    ]
+
+    n_plots = len(categorical_columns)
+
+    if n_plots == 0:
+        raise ValueError("No categorical columns found to plot.")
+
+    n_rows = math.ceil(n_plots / n_cols)
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(figsize_per_plot[0] * n_cols, figsize_per_plot[1] * n_rows),
+        constrained_layout=True,
+    )
+
+    axes = pd.Series(axes.flatten())
+
+    for ax, column in zip(axes, categorical_columns):
+        counts = df[column].fillna("Missing").astype(str).value_counts()
+
+        # Keep the figure readable when a feature has many categories.
+        if len(counts) > top_n:
+            top_counts = counts.head(top_n)
+            other_count = counts.iloc[top_n:].sum()
+            counts = pd.concat([
+                top_counts,
+                pd.Series({"Other": other_count})
+            ])
+
+        counts = counts.sort_values()
+
+        ax.barh(counts.index, counts.values, color=FORMAL_COLORS["gold"])
+        ax.set_title(column)
+        ax.set_xlabel("Count")
+        ax.set_ylabel("Category")
+
+        # Add count labels next to each bar.
+        for index, value in enumerate(counts.values):
+            ax.text(value, index, f" {value}", va="center")
+
+    for ax in axes[n_plots:]:
+        ax.axis("off")
+
+    fig.suptitle(f"Categorical Feature Counts - Top {top_n}", fontsize=16, fontweight="bold")
+
+    return
+
