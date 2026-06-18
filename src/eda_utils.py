@@ -1,7 +1,7 @@
-import math
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+import unicodedata
+from difflib import SequenceMatcher
 
 
 def explore_target(y, currency=None):
@@ -248,6 +248,76 @@ def unique_values_summary(df):
     )
 
 
+def normalize_category_text(value):
+    """
+    Normalizes categorical text to make similar values easier to compare.
+
+    Returns:
+        str: normalized version of the category.
+    """
+    if pd.isna(value):
+        return "missing"
+
+    value = str(value).strip().lower()
+
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(char for char in value if not unicodedata.combining(char))
+
+    value = value.replace("_", " ").replace("-", " ")
+    value = " ".join(value.split())
+
+    return value
+
+
+def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
+    """
+    Finds groups of categories that are semantically similar or almost identical.
+
+    Returns:
+        pd.DataFrame: table with feature, grouped original values,
+        normalized representative value and total count.
+    """
+    rows = []
+
+    for column in columns:
+        value_counts = df[column].dropna().astype(str).value_counts()
+
+        categories = value_counts.index.tolist()
+        normalized_values = {category: normalize_category_text(category) for category in categories}
+
+        used_categories = set()
+
+        for category in categories:
+            if category in used_categories:
+                continue
+
+            group = [category]
+            used_categories.add(category)
+
+            for other_category in categories:
+                if other_category in used_categories:
+                    continue
+
+                similarity = SequenceMatcher(None, normalized_values[category], normalized_values[other_category]).ratio()
+
+                if similarity >= similarity_threshold:
+                    group.append(other_category)
+                    used_categories.add(other_category)
+
+            if len(group) > 1:
+                normalized_group = sorted({normalized_values[value] for value in group})
+
+                rows.append({
+                    "feature": column,
+                    "similar_values": " | ".join(group),
+                    "normalized_values": " | ".join(normalized_group),
+                    "total_count": value_counts[group].sum(),
+                    "n_values_grouped": len(group),
+                })
+
+    return (pd.DataFrame(rows).sort_values(["feature", "total_count"], ascending=[True, False]).reset_index(drop=True))
+
+
 def get_constant_columns(df):
     """ Returns constant columns and their unique value """
 
@@ -303,6 +373,42 @@ def convert_peso_prices_to_usd(df, price_col="Precio", currency_col="Moneda", pe
     return data.drop(columns=[currency_col])
 
 
+def invert_category_map(category_map):
+    """
+    Converts a dictionary of final_value -> list of variants
+    into variant -> final_value.
+    """
+    inverted_map = {}
+
+    for final_value, variants in category_map.items():
+        final_value_norm = normalize_category_text(final_value)
+
+        for variant in variants:
+            variant_norm = normalize_category_text(variant)
+            inverted_map[variant_norm] = final_value_norm
+
+    return inverted_map
+
+
+def apply_semantic_mapping(df, column, category_map):
+    """
+    Normalizes a categorical column and replaces equivalent values
+    using a manual semantic mapping.
+
+    Returns:
+        pd.DataFrame: dataset with the cleaned categorical column.
+    """
+    data = df.copy()
+
+    inverted_map = invert_category_map(category_map)
+
+    normalized_column = data[column].apply(normalize_category_text)
+
+    data[column] = normalized_column.map(inverted_map).fillna(normalized_column)
+
+    return data
+
+
 def encode_camera_retroceso(df, col="Con cámara de retroceso"):
     data = df.copy()
 
@@ -315,6 +421,8 @@ def encode_camera_retroceso(df, col="Con cámara de retroceso"):
     )
 
     return data
+
+
 
 
 def one_hot_encoding(df, categorical_cols = ["escuela", "semestre"], train = True, categories_map = None):

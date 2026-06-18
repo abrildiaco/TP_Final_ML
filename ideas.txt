@@ -35,13 +35,26 @@ Objetivo: dejar los datos comparables y listos para sacar conclusiones.
 - Revisar Moneda: 👍
   convertir todos los precios a una misma moneda.
 
+- Limpieza semántica -> Automática/automatica pasarlo a UNA. Lo mismo con COLOR. Unificar sinonimos
+  "dos categorías distintas representan exactamente la misma información."
+
+- Modelo/Version: Modelos/Version con menos de 10/20 publicaciones pasan a ser 'Other' asi el modelo no aprende rudio
+  CONSIDERAR ELIMINAR VERSION -> VER CORRELACION CON EL PRECIO
+
+- Motor: pasar de 2.0 Turbo a 2.0 y tartarlo como numerica
+
+- Titulo: considerar eliminarla. Tiene muchísimo texto redundante. Además repite marca, modelo y version
+
+- Descripcion: tambien considerar eliminarla. Aunqie se puede hacer NLP
+
 - Convertir variables a numericas:
   Precio, Año, Puertas y Kilometros.
-
   -> Tipo de vendedor, Marca, Color, Tipo de Combiustible con ONE-HOT
 
 - Crear nuevas variables:
   age = 2026 - Año.
+  km_por_año = Kilómetros / Edad
+  Marca_Modelo
 
 - Limpiar categorias:
   Normalizar Marca, Modelo, Color, Transmision, Combustible y Tipo de vendedor.
@@ -62,6 +75,12 @@ Objetivo: dejar los datos comparables y listos para sacar conclusiones.
   Eliminar solo valores imposibles o claramente mal cargados.
   Considerar usar log(Precio) para reducir el impacto de valores extremos.
   Decidir que hacer con outliers que no tienen sentido.
+
+- ENCODING (opciones):
+  1) One Hot: Sirve perfecto para ridge, lasso, redes, knn
+      - marca, modelo, color, tipo vendedor, combustible, transimision
+  2) Label Encoding: Para árboles (Random Forest, XGBoost)
+
 
 
 # 3. Despues de preprocesar
