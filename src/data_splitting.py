@@ -89,7 +89,7 @@ def train_val_split_stratified(X, y, stratify_by, train_size = 0.80, random_stat
 
     return (X_train, y_train), (X_val, y_val)
 
-
+# VER ESTOOOOOOO
 def make_price_bins(y, n_bins=5):
     """
     Creates quantile-based price bins for stratified regression splits.

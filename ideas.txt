@@ -209,3 +209,19 @@ Objetivo: responder preguntas ajustadas por las caracteristicas del auto.
 6. Marca con menor dispersion de precios:
    Primero ranking de IQR por Marca.
    Luego ranking de desviacion de residuos por Marca.
+
+IDEA Motor
+1, 1.0, 1.0T, 1.0 turbo, 1.0 tsi -> cilindrada 1.0
+1.2, 1.2 turbo -> cilindrada 1.2
+1.3, 1.3T, 1.3 Turbo, T270 1.3 -> cilindrada 1.3
+1.4, 1.4 TSI, 1.4tsi -> cilindrada 1.4
+1.5, 1500, 1.5T, 1.5 Turbo -> cilindrada 1.5
+1.6, 1600, 1.6 MSI, 1.6T -> cilindrada 1.6
+2, 2.0, 2.0T, 2.0 TDI, 2.0 TSI -> cilindrada 2.0
+2.8, 2.8TDI, Motor 2.8 turbo diesel -> cilindrada 2.8}
+
+engine_liters
+engine_size_group
+engine_has_turbo
+engine_is_hybrid_or_electric
+engine_is_diesel_hint
