@@ -122,11 +122,7 @@ def build_category_summary(df, categorical_columns=None):
     return summary
 
 
-def save_category_audit_report(
-    category_summary,
-    category_table,
-    output_path="html/category_audit_report.html",
-):
+def save_category_audit_report(category_summary, category_table, output_path="html/category_audit_report.html",):
     """
     Saves a complete HTML report with all categorical values.
 
@@ -147,24 +143,40 @@ def save_category_audit_report(
         "<style>",
         "body { font-family: Arial, sans-serif; margin: 32px; }",
         "h1 { color: #1F4E79; }",
-        "h2 { margin-top: 36px; color: #1F4E79; }",
-        "table { border-collapse: collapse; width: 100%; margin-bottom: 24px; }",
-        "th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; }",
+        "h2 { margin-top: 0; color: #1F4E79; }",
+        ".summary-table { border-collapse: collapse; width: auto; margin-bottom: 32px; }",
+        ".feature-grid { display: grid; grid-template-columns: repeat(2, minmax(360px, max-content)); gap: 28px; align-items: start; }",
+        ".feature-card { width: fit-content; max-width: 100%; overflow-x: auto; }",
+        "table { border-collapse: collapse; width: auto; margin-bottom: 12px; }",
+        "th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 13px; white-space: nowrap; }",
         "th { background-color: #E9ECEF; text-align: left; }",
         "tr:nth-child(even) { background-color: #F8F9FA; }",
+        ".category-table td:nth-child(2) { max-width: 360px; white-space: normal; word-break: break-word; }",
+        "@media (max-width: 900px) { .feature-grid { grid-template-columns: 1fr; } }",
         "</style></head><body>",
         "<h1>Categorical Features Audit</h1>",
         "<p>Full list of categories, counts, and percentages by feature.</p>",
         "<h2>Summary</h2>",
-        category_summary.to_html(index=False),
+        category_summary.to_html(index=False, classes="summary-table"),
+        "<div class='feature-grid'>",
     ]
 
     for feature in category_summary["feature"]:
-        feature_table = category_table[category_table["feature"] == feature]
-        html_parts.append(f"<h2>{feature}</h2>")
-        html_parts.append(feature_table.to_html(index=False))
+        feature_table = (
+            category_table[category_table["feature"] == feature]
+            [["rank", "category", "count", "percentage"]]
+            .copy()
+        )
 
-    html_parts.append("</body></html>")
+        html_parts.append("<div class='feature-card'>")
+        html_parts.append(f"<h2>{feature}</h2>")
+        html_parts.append(feature_table.to_html(index=False, classes="category-table"))
+        html_parts.append("</div>")
+
+    html_parts.extend([
+        "</div>",
+        "</body></html>",
+    ])
 
     report_path.write_text("\n".join(html_parts), encoding="utf-8")
 
