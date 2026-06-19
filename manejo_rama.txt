@@ -1,7 +1,6 @@
 Caso 1: ella editó y quiere subirlo
 En la compu de ella:
 
-git switch -c rama-amiga
 git add .
 git commit -m "Cambios de amiga"
 git push -u origin rama-amiga

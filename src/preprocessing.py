@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import re
 from eda_utils import normalize_category_text, invert_category_map
 
 def drop_irrelevant_columns(df, columns_to_drop):
@@ -67,6 +68,28 @@ def convert_peso_prices_to_usd(df, price_col = "Precio", currency_col = "Moneda"
     return data.drop(columns = [currency_col])
 
 
+def extract_first_integer(value):
+    """
+    Extracts the first space-separated value and converts it to integer.
+
+    Arguments:
+        value (object): value to transform
+
+    Returns:
+        int | float: extracted integer or np.nan if conversion is not possible
+    """
+    if pd.isna(value):
+        return np.nan
+
+    first_part = str(value).strip().split()[0]
+    first_part = first_part.replace(",", "")
+
+    try:
+        return int(float(first_part))
+    except ValueError:
+        return np.nan
+
+
 def apply_semantic_mapping(df, column, category_map):
     """
     Applies a manual semantic mapping to a categorical column.
@@ -88,7 +111,115 @@ def apply_semantic_mapping(df, column, category_map):
     return data
 
 
-def map_column_values(df, column, value_map, copy = True):
+def extract_engine_liters(value):
+    """
+    Extracts engine displacement in liters from a text value.
+
+    Arguments:
+        value (object): original engine value
+
+    Returns:
+        float: engine displacement in liters or np.nan if not found
+    """
+    if pd.isna(value):
+        return np.nan
+
+    text = normalize_category_text(value)
+    text = text.replace(",", ".")
+
+    # Separate numbers from letters
+    text = re.sub(r"(\d)([a-zA-Z])", r"\1 \2", text)
+    text = re.sub(r"([a-zA-Z])(\d)", r"\1 \2", text)
+
+    numbers = re.findall(r"\d+(?:\.\d+)?", text)
+
+    for number_text in numbers:
+        number = float(number_text)
+
+        # Values like 1.4, 2.0, 3.6 usually represent liters
+        if 0.8 <= number <= 8.0:
+            return round(number, 1)
+
+        # Values like 1400, 1600, 2000 usually represent cubic centimeters
+        if 800 <= number <= 8000:
+            return round(number / 1000, 1)
+
+    return np.nan
+
+
+def encode_engine_size(engine_liters):
+    """
+    Encodes engine displacement into an ordinal numeric group.
+
+    Arguments:
+        engine_liters (float): engine displacement in liters
+
+    Returns:
+        int: encoded engine size group
+    """
+    if pd.isna(engine_liters):
+        return 0
+
+    if engine_liters <= 1.2:
+        return 1
+
+    if engine_liters <= 1.6:
+        return 2
+
+    if engine_liters <= 2.0:
+        return 3
+
+    if engine_liters <= 2.8:
+        return 4
+
+    return 5
+
+
+def has_turbo(value, turbo_patterns):
+    """
+    Detects whether an engine text suggests turbo.
+
+    Arguments:
+        value (object): original engine value
+        turbo_patterns (list[str]): regex patterns that indicate turbo
+
+    Returns:
+        int: 1 if turbo is detected, 0 otherwise
+    """
+    if pd.isna(value):
+        return 0
+
+    text = normalize_category_text(value)
+    pattern = "|".join(turbo_patterns)
+
+    return int(bool(re.search(pattern, text)))
+
+
+# NO SE USA ESTA FUNCION
+def add_engine_numeric_features(df, engine_col="Motor", turbo_patterns=None):
+    """
+    Creates numeric engine features from a raw engine text column.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing the engine column
+        engine_col (str): raw engine column name
+        turbo_patterns (list[str] | None): regex patterns that indicate turbo
+
+    Returns:
+        pd.DataFrame: dataset with numeric engine features
+    """
+    data = df.copy()
+
+    data["engine_liters"] = data[engine_col].apply(extract_engine_liters)
+    data["engine_size_group_code"] = data["engine_liters"].apply(encode_engine_size)
+    data["engine_has_turbo"] = data[engine_col].apply(
+        lambda value: has_turbo(value, turbo_patterns=turbo_patterns)
+    )
+
+    return data
+
+
+def map_column_values(df, column, value_map):
     """
     Maps values from a column using a dictionary.
 
@@ -101,7 +232,7 @@ def map_column_values(df, column, value_map, copy = True):
     Returns:
         pd.DataFrame: dataset with mapped column values
     """
-    data = df.copy() if copy else df
+    data = df.copy()
 
     data[column] = (
         data[column]
