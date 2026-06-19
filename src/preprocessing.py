@@ -127,9 +127,10 @@ def extract_engine_liters(value, require_engine_context=False, allow_start_numbe
     if require_engine_context:
         patterns = [
             r"\bmotor\s*(?:de)?\s*\d\.\d\s*l?\b",
-            r"\b\d\.\d\s*(?:l|t|turbo|tsi|tdi|thp|vti|tce|hdi|tfsi|fsi)\b",
+            r"\b\d\.\d\s*(?:l|t|turbo|tsi|tdi|thp|vti|tce|hdi|tfsi|fsi|hibrida|hibrido|hybrid)\b",
             r"\b\d\.\d(?:t)\b",
-            r"\b\d{4}\s*cc\b"
+            r"\b\d{4}\s*cc\b",
+            r"\b\d\.\d\s*(?:cv|hp)\b"
         ]
 
         if allow_start_number:

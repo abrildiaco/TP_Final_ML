@@ -422,15 +422,15 @@ def invert_category_map(category_map):
 # TTTTTTEEEEEESSSSSTTTTTT
 def print_missing_feature_text(df, feature_col, text_cols=("Título", "Descripción"), max_rows=None):
     """
-    Prints title and description for rows where a selected feature is missing.
-
-    Arguments:
-        df (pd.DataFrame): dataset to inspect
-        feature_col (str): column used to detect missing values
-        text_cols (tuple[str]): text columns to print
-        max_rows (int | None): maximum number of rows to print
+    Prints text columns for rows where a selected feature is missing.
+    Detects both real NaN values and text values like 'missing'.
     """
-    missing_rows = df[df[feature_col].isna()].copy()
+    missing_mask = (
+        df[feature_col].isna()
+        | df[feature_col].astype(str).str.strip().str.lower().eq("missing")
+    )
+
+    missing_rows = df[missing_mask].copy()
 
     if max_rows is not None:
         missing_rows = missing_rows.head(max_rows)
@@ -444,7 +444,6 @@ def print_missing_feature_text(df, feature_col, text_cols=("Título", "Descripci
         for col in text_cols:
             if col in df.columns:
                 value = row[col]
-
                 if pd.isna(value):
                     value = "Missing"
 
