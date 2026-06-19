@@ -1,5 +1,6 @@
 import unicodedata # Library for normalizing text, used in semantic repetition detection
 from difflib import SequenceMatcher # Library for measuring string similarity, used in semantic repetition detection
+import re # Library for regular expressions, used in text normalization and feature extraction
 
 import numpy as np
 import pandas as pd
@@ -446,3 +447,267 @@ def compact_value_counts(df, columns):
         tables.append(counts)
 
     return pd.concat(tables, axis=1)
+
+
+import re
+
+
+def extract_engine_liters(value):
+    """
+    Extracts engine displacement in liters from a text value.
+
+    Arguments:
+        value (object): original engine value
+
+    Returns:
+        float: engine displacement in liters or np.nan if not found
+    """
+    if pd.isna(value):
+        return np.nan
+
+    text = normalize_category_text(value)
+    text = text.replace(",", ".")
+
+    # Separate numbers from letters
+    text = re.sub(r"(\d)([a-zA-Z])", r"\1 \2", text)
+    text = re.sub(r"([a-zA-Z])(\d)", r"\1 \2", text)
+
+    numbers = re.findall(r"\d+(?:\.\d+)?", text)
+
+    for number_text in numbers:
+        number = float(number_text)
+
+        # Values like 1.4, 2.0, 3.6 usually represent liters
+        if 0.8 <= number <= 8.0:
+            return round(number, 1)
+
+        # Values like 1400, 1600, 2000 usually represent cubic centimeters
+        if 800 <= number <= 8000:
+            return round(number / 1000, 1)
+
+    return np.nan
+
+
+def encode_engine_size(engine_liters):
+    """
+    Encodes engine displacement into an ordinal numeric group.
+
+    Arguments:
+        engine_liters (float): engine displacement in liters
+
+    Returns:
+        int: encoded engine size group
+    """
+    if pd.isna(engine_liters):
+        return 0
+
+    if engine_liters <= 1.2:
+        return 1
+
+    if engine_liters <= 1.6:
+        return 2
+
+    if engine_liters <= 2.0:
+        return 3
+
+    if engine_liters <= 2.8:
+        return 4
+
+    return 5
+
+
+def has_turbo(value, turbo_patterns):
+    """
+    Detects whether an engine text suggests turbo.
+
+    Arguments:
+        value (object): original engine value
+        turbo_patterns (list[str]): regex patterns that indicate turbo
+
+    Returns:
+        int: 1 if turbo is detected, 0 otherwise
+    """
+    if pd.isna(value):
+        return 0
+
+    text = normalize_category_text(value)
+    pattern = "|".join(turbo_patterns)
+
+    return int(bool(re.search(pattern, text)))
+
+
+def add_engine_numeric_features(df, engine_col="Motor", turbo_patterns=None):
+    """
+    Creates numeric engine features from a raw engine text column.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing the engine column
+        engine_col (str): raw engine column name
+        turbo_patterns (list[str] | None): regex patterns that indicate turbo
+
+    Returns:
+        pd.DataFrame: dataset with numeric engine features
+    """
+    data = df.copy()
+
+    data["engine_liters"] = data[engine_col].apply(extract_engine_liters)
+    data["engine_size_group_code"] = data["engine_liters"].apply(encode_engine_size)
+    data["engine_has_turbo"] = data[engine_col].apply(
+        lambda value: has_turbo(value, turbo_patterns=turbo_patterns)
+    )
+
+    return data
+
+
+def drop_irrelevant_columns(df, columns_to_drop):
+    """
+    Removes columns that do not provide useful information.
+
+    Arguments:
+        df (pd.DataFrame): dataset to transform
+        columns_to_drop (list[str]): columns to remove
+
+    Returns:
+        pd.DataFrame: dataset without selected columns
+    """
+    data = df.copy()
+
+    return data.drop(columns=columns_to_drop, errors="ignore")
+
+
+def remove_invalid_values(df, range_rules, copy=True):
+    """
+    Filters rows using numeric range rules.
+
+    Arguments:
+        df (pd.DataFrame): dataset to filter
+        range_rules (dict): column names mapped to minimum and maximum valid values
+        copy (bool): whether to return a copy instead of modifying df in place
+
+    Returns:
+        pd.DataFrame: dataset with rows inside the selected ranges
+    """
+    data = df.copy() if copy else df
+
+    for column, limits in range_rules.items():
+        min_value = limits.get("min", -np.inf)
+        max_value = limits.get("max", np.inf)
+
+        values = pd.to_numeric(data[column], errors="coerce")
+        data = data[(values >= min_value) & (values <= max_value)]
+
+    return data
+
+
+def convert_peso_prices_to_usd(df, price_col = "Precio", currency_col = "Moneda", peso_symbol = "$",
+                               exchange_rate = (895.25 + 913) / 2, copy = True,):
+    """
+    Converts prices in Argentine pesos to USD and removes the currency column.
+
+    Arguments:
+        df (pd.DataFrame): dataset with price and currency columns
+        price_col (str): price column name
+        currency_col (str): currency column name
+        peso_symbol (str): value used to identify Argentine pesos
+        exchange_rate (float): ARS/USD rate used for conversion
+        copy (bool): whether to return a copy instead of modifying df in place
+
+    Returns:
+        pd.DataFrame: dataset with peso prices converted to USD
+    """
+    data = df.copy() if copy else df
+
+    peso_mask = data[currency_col].eq(peso_symbol)
+    data[price_col] = pd.to_numeric(data[price_col])
+    data.loc[peso_mask, price_col] = data.loc[peso_mask, price_col] / exchange_rate
+
+    return data.drop(columns = [currency_col])
+
+
+def extract_first_integer(value):
+    """
+    Extracts the first space-separated value and converts it to integer.
+
+    Arguments:
+        value (object): value to transform
+
+    Returns:
+        int | float: extracted integer or np.nan if conversion is not possible
+    """
+    if pd.isna(value):
+        return np.nan
+
+    first_part = str(value).strip().split()[0]
+    first_part = first_part.replace(",", "")
+
+    try:
+        return int(float(first_part))
+    except ValueError:
+        return np.nan
+
+
+def map_column_values(df, column, value_map, copy = True):
+    """
+    Maps values from a column using a dictionary.
+
+    Arguments:
+        df (pd.DataFrame): dataset to transform
+        column (str): column to map
+        value_map (dict): original value to mapped value dictionary
+        copy (bool): whether to return a copy instead of modifying df in place
+
+    Returns:
+        pd.DataFrame: dataset with mapped column values
+    """
+    data = df.copy() if copy else df
+
+    data[column] = (
+        data[column]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .map(value_map)
+    )
+
+    return data
+
+
+def one_hot_encoding(df, categorical_cols = None, train=True, categories_map=None):
+    """
+    Applies one-hot encoding to categorical columns.
+
+    Arguments:
+        df (pd.DataFrame): dataset to encode
+        categorical_cols (list[str] | None): categorical columns to encode
+        train (bool): whether the dataset is a training set
+        categories_map (dict | None): categories learned from the training set
+
+    Returns:
+        pd.DataFrame | tuple[pd.DataFrame, dict]: encoded dataset and, during training, learned categories
+    """
+    data = df.copy()
+    categorical_cols = categorical_cols or []
+
+    if train:
+        categories_map = {}
+
+        for column in categorical_cols:
+            categories_map[column] = sorted(data[column].dropna().unique())
+
+            # Learn categories only from the training data
+            for category in categories_map[column]:
+                data[f"{column}_{category}"] = (data[column] == category).astype(int)
+
+            data = data.drop(columns=[column])
+
+        return data, categories_map
+
+    for column in categorical_cols:
+        # Reuse training categories so validation and test keep the same columns
+        for category in categories_map[column]:
+            data[f"{column}_{category}"] = (data[column] == category).astype(int)
+
+        data = data.drop(columns=[column])
+
+    return data
+>>>>>>> e832c99349da0f641271e50966dce8b0b6f2e340
