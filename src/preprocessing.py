@@ -111,21 +111,39 @@ def apply_semantic_mapping(df, column, category_map):
     return data
 
 
-def extract_engine_liters(value):
+def extract_engine_liters(value, require_engine_context=False, allow_start_number=False):
     """
     Extracts engine displacement in liters from a text value.
 
-    Arguments:
-        value (object): original engine value
-
-    Returns:
-        float: engine displacement in liters or np.nan if not found
+    If require_engine_context=True, it only extracts values that appear with
+    reliable engine-related patterns.
     """
     if pd.isna(value):
         return np.nan
 
     text = normalize_category_text(value)
     text = text.replace(",", ".")
+
+    if require_engine_context:
+        patterns = [
+            r"\bmotor\s*(?:de)?\s*\d\.\d\s*l?\b",
+            r"\b\d\.\d\s*(?:l|t|turbo|tsi|tdi|thp|vti|tce|hdi|tfsi|fsi)\b",
+            r"\b\d\.\d(?:t)\b",
+            r"\b\d{4}\s*cc\b"
+        ]
+
+        if allow_start_number:
+            patterns.append(r"^\s*\d\.\d\b")
+
+        matches = []
+
+        for pattern in patterns:
+            matches.extend(re.findall(pattern, text))
+
+        if not matches:
+            return np.nan
+
+        text = " ".join(matches)
 
     # Separate numbers from letters
     text = re.sub(r"(\d)([a-zA-Z])", r"\1 \2", text)
@@ -145,6 +163,64 @@ def extract_engine_liters(value):
             return round(number / 1000, 1)
 
     return np.nan
+
+
+def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", "Descripción", "Versión"), version_col="Versión", return_audit=True,):
+    """
+    Fills missing engine values using reliable engine patterns found in text columns.
+    """
+    data = df.copy()
+
+    missing_mask = data[engine_col].isna()
+
+    extracted_liters = pd.Series(np.nan, index=data.index)
+
+    if version_col in data.columns:
+        extracted_liters = data[version_col].apply(
+            lambda value: extract_engine_liters(
+                value,
+                require_engine_context=True,
+                allow_start_number=True
+            )
+        )
+
+    text_source = pd.Series("", index=data.index)
+
+    for col in text_cols:
+        if col in data.columns and col != version_col:
+            text_source = text_source + " " + data[col].fillna("").astype(str)
+
+    extracted_from_text = text_source.apply(
+        lambda value: extract_engine_liters(
+            value,
+            require_engine_context=True,
+            allow_start_number=False
+        )
+    )
+
+    extracted_liters = extracted_liters.fillna(extracted_from_text)
+
+    fill_mask = missing_mask & extracted_liters.notna()
+
+    data.loc[fill_mask, engine_col] = extracted_liters[fill_mask].astype(str)
+
+    audit_table = pd.DataFrame({
+        "row_index": data.index,
+        "extracted_liters": extracted_liters,
+        "was_missing": missing_mask,
+        "was_filled": fill_mask,
+    })
+
+    audit_table = audit_table[audit_table["was_missing"]].reset_index(drop=True)
+
+    print(f"Missing rows in '{engine_col}': {missing_mask.sum()}")
+    print(f"Filled from text: {fill_mask.sum()}")
+    print(f"Still missing after text search: {missing_mask.sum() - fill_mask.sum()}")
+
+    if return_audit:
+        return data, audit_table
+
+    return data
 
 
 def encode_engine_size(engine_liters):

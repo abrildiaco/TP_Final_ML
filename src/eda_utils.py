@@ -4,7 +4,6 @@ import re # Library for regular expressions, used in text normalization and feat
 
 import numpy as np
 import pandas as pd
-from preprocessing import extract_engine_liters, encode_engine_size, has_turbo
 
 # ========================= Label Analysis =========================
 def explore_target(y, currency=None):
@@ -419,4 +418,41 @@ def invert_category_map(category_map):
             inverted_map[variant_norm] = final_value_norm
 
     return inverted_map
+
+# TTTTTTEEEEEESSSSSTTTTTT
+def print_missing_feature_text(df, feature_col, text_cols=("Título", "Descripción"), max_rows=None):
+    """
+    Prints title and description for rows where a selected feature is missing.
+
+    Arguments:
+        df (pd.DataFrame): dataset to inspect
+        feature_col (str): column used to detect missing values
+        text_cols (tuple[str]): text columns to print
+        max_rows (int | None): maximum number of rows to print
+    """
+    missing_rows = df[df[feature_col].isna()].copy()
+
+    if max_rows is not None:
+        missing_rows = missing_rows.head(max_rows)
+
+    print(f"Missing values in '{feature_col}': {len(missing_rows)} rows")
+    print("=" * 100)
+
+    for idx, row in missing_rows.iterrows():
+        print(f"\nROW INDEX: {idx}\n")
+
+        for col in text_cols:
+            if col in df.columns:
+                value = row[col]
+
+                if pd.isna(value):
+                    value = "Missing"
+
+                print(f"{col}:")
+                print(str(value))
+                print()
+
+        print("=" * 100)
+
+
 

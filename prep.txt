@@ -5,4 +5,17 @@ QUE HICIMOS CON LAS FEATURES EN EL Preprocesamiento
 3) moneda -> borrada luego de pasar tood a dolares
 4) kilometros -> pasamos de str a float
 5) camara -> var binaria
-6) marca, modelo, color, tipo vendedor, combustible, transimision --> ONE HOT
+6) marca --> ONE HOT
+7) modelo --> ONE HOT
+8) color --> ONE HOT
+9) tipo vendedor --> ONE HOT
+10) combustible --> ONE HOT
+11) transimision --> ONE HOT
+12) Años -> NADA, es numerica
+13) Puertas -> NADA, es numerica
+14) motor --> borrada
+
+FALTAN:
+1) Descripcion
+2) version
+3) Título

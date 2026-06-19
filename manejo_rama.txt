@@ -1,3 +1,51 @@
+/////////////
+
+# CASO 1: Isa quiere subir cambios en su rama
+git switch rama-isa
+git add .
+git commit -m "Cambios de Isa"
+git push -u origin rama-isa
+
+# CASO 1: Abru quiere subir cambios en su rama
+git switch rama-abru
+git add .
+git commit -m "Cambios de Abru"
+git push -u origin rama-abru
+
+/////////////
+
+# CASO 2: Isa quiere ver los cambios de Abru
+git fetch
+git switch rama-abru
+    si no deja: git switch -c rama-abru origin/rama-abru
+
+# CASO 2: Abru quiere ver los cambios de Isa
+git fetch
+git switch rama-isa
+    si no deja: git switch -c rama-isa origin/rama-isa
+
+/////////////
+
+# CASO 3: Isa quiere trabajar en su parte
+git switch rama-isa
+git pull
+
+# CASO 3: Abru quiere trabajar en su parte
+git switch rama-abru
+git pull
+
+/////////////
+
+# CASO 4: juntar todo en GitHub
+# Hacen dos Pull Requests:
+
+rama-isa → main
+rama-abru → main
+
+
+
+
+
 Caso 1: ella editó y quiere subirlo
 En la compu de ella:
 
