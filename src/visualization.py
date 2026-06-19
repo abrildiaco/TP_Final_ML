@@ -92,6 +92,126 @@ def plot_currency_counts(data, currency_col="Moneda", title="Cantidad de publica
     plt.tight_layout()
     plt.show()
 
+
+def plot_unique_values(data, top_n=None, title="Unique values by column"):
+    """
+    Plots the number of unique values per column.
+
+    Arguments:
+        data (pd.DataFrame): dataset to analyze
+        top_n (int | None): number of columns to show
+        title (str): plot title
+    """
+
+    unique_table = unique_values_summary(data)
+
+    if top_n is not None:
+        unique_table = unique_table.head(top_n)
+
+    fig, ax = plt.subplots(
+        figsize=(10, max(4, 0.35 * len(unique_table)))
+    )
+
+    bars = ax.barh(
+        unique_table["column"],
+        unique_table["unique_values"],
+        color=FORMAL_COLORS["red"]
+    )
+
+    ax.invert_yaxis()
+
+    for bar, value in zip(bars, unique_table["unique_values"]):
+        ax.text(
+            value,
+            bar.get_y() + bar.get_height() / 2,
+            f" {int(value)}",
+            va="center",
+            fontsize=9
+        )
+
+    ax.set_title(title, fontsize=14, fontweight="bold")
+    ax.set_xlabel("Number of unique values")
+    ax.set_ylabel("Column")
+    ax.grid(axis="x", alpha=0.25)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_categorical_counts(df, categorical_columns=None, ignored_columns=None, top_n=10, n_cols=2, figsize_per_plot=(7, 4),):
+    """
+    Plots category counts for categorical features in a single figure.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing categorical features
+        categorical_columns (list[str] | None): categorical columns to plot
+        ignored_columns (list[str] | None): columns to exclude from the plot
+        top_n (int): maximum number of categories shown per feature
+        n_cols (int): number of subplot columns in the figure
+        figsize_per_plot (tuple[int, int]): size multiplier for each subplot
+
+    Returns:
+        tuple[plt.Figure, np.ndarray]: figure and axes used for the plots
+    """
+    ignored_columns = ignored_columns or []
+
+    if categorical_columns is None:
+        categorical_columns = df.select_dtypes(
+            include=["object", "category", "bool"]
+        ).columns.tolist()
+
+    categorical_columns = [
+        column for column in categorical_columns
+        if column not in ignored_columns and not column.startswith("Unnamed:")
+    ]
+
+    n_plots = len(categorical_columns)
+
+    if n_plots == 0:
+        raise ValueError("No categorical columns found to plot.")
+
+    n_rows = math.ceil(n_plots / n_cols)
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(figsize_per_plot[0] * n_cols, figsize_per_plot[1] * n_rows),
+        constrained_layout=True,
+    )
+
+    axes = pd.Series(axes.flatten())
+
+    for ax, column in zip(axes, categorical_columns):
+        counts = df[column].fillna("Missing").astype(str).value_counts()
+
+        # Keep the figure readable when a feature has many categories.
+        if len(counts) > top_n:
+            top_counts = counts.head(top_n)
+            other_count = counts.iloc[top_n:].sum()
+            counts = pd.concat([
+                top_counts,
+                pd.Series({"Other": other_count})
+            ])
+
+        counts = counts.sort_values()
+
+        ax.barh(counts.index, counts.values, color=FORMAL_COLORS["gold"])
+        ax.set_title(column)
+        ax.set_xlabel("Count")
+        ax.set_ylabel("Category")
+
+        # Add count labels next to each bar.
+        for index, value in enumerate(counts.values):
+            ax.text(value, index, f" {value}", va="center")
+
+    for ax in axes[n_plots:]:
+        ax.axis("off")
+
+    fig.suptitle(f"Categorical Feature Counts - Top {top_n}", fontsize=16, fontweight="bold")
+
+    return
+
+
 def plot_price_distribution_by_currency(data, price_col="Precio", currency_col="Moneda", bins=40, title="Distribución de precio por moneda"):
     """
     Plots price distributions separately by currency.
@@ -249,51 +369,6 @@ def plot_preliminary_outliers(data, numeric_cols=("Precio", "Año", "Kilómetros
     plt.show()
 
 
-def plot_unique_values(data, top_n=None, title="Unique values by column"):
-    """
-    Plots the number of unique values per column.
-
-    Arguments:
-        data (pd.DataFrame): dataset to analyze
-        top_n (int | None): number of columns to show
-        title (str): plot title
-    """
-
-    unique_table = unique_values_summary(data)
-
-    if top_n is not None:
-        unique_table = unique_table.head(top_n)
-
-    fig, ax = plt.subplots(
-        figsize=(10, max(4, 0.35 * len(unique_table)))
-    )
-
-    bars = ax.barh(
-        unique_table["column"],
-        unique_table["unique_values"],
-        color=FORMAL_COLORS["red"]
-    )
-
-    ax.invert_yaxis()
-
-    for bar, value in zip(bars, unique_table["unique_values"]):
-        ax.text(
-            value,
-            bar.get_y() + bar.get_height() / 2,
-            f" {int(value)}",
-            va="center",
-            fontsize=9
-        )
-
-    ax.set_title(title, fontsize=14, fontweight="bold")
-    ax.set_xlabel("Number of unique values")
-    ax.set_ylabel("Column")
-    ax.grid(axis="x", alpha=0.25)
-
-    plt.tight_layout()
-    plt.show()
-
-
 def plot_camera_missing_by_year(df, year_col="Año", camera_col="Con cámara de retroceso", title="Nulos de cámara de retroceso por año",):
 
     """
@@ -362,78 +437,43 @@ def plot_camera_missing_by_year(df, year_col="Año", camera_col="Con cámara de 
 
     return summary
 
+ 
+def plot_compact_value_counts(df, columns, top_n=10, n_cols=2):
+    """ Plots compact horizontal bar charts for categorical value counts """
+    n_rows = math.ceil(len(columns) / n_cols)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 4 * n_rows))
+    axes = axes.flatten()
+    bar_color = FORMAL_COLORS["teal"]
 
-
-def plot_categorical_counts(df, categorical_columns=None, ignored_columns=None, top_n=10, n_cols=2, figsize_per_plot=(7, 4),):
-    """
-    Plots category counts for categorical features in a single figure.
-
-    Arguments:
-        df (pd.DataFrame): dataset containing categorical features
-        categorical_columns (list[str] | None): categorical columns to plot
-        ignored_columns (list[str] | None): columns to exclude from the plot
-        top_n (int): maximum number of categories shown per feature
-        n_cols (int): number of subplot columns in the figure
-        figsize_per_plot (tuple[int, int]): size multiplier for each subplot
-
-    Returns:
-        tuple[plt.Figure, np.ndarray]: figure and axes used for the plots
-    """
-    ignored_columns = ignored_columns or []
-
-    if categorical_columns is None:
-        categorical_columns = df.select_dtypes(
-            include=["object", "category", "bool"]
-        ).columns.tolist()
-
-    categorical_columns = [
-        column for column in categorical_columns
-        if column not in ignored_columns and not column.startswith("Unnamed:")
-    ]
-
-    n_plots = len(categorical_columns)
-
-    if n_plots == 0:
-        raise ValueError("No categorical columns found to plot.")
-
-    n_rows = math.ceil(n_plots / n_cols)
-
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(figsize_per_plot[0] * n_cols, figsize_per_plot[1] * n_rows),
-        constrained_layout=True,
-    )
-
-    axes = pd.Series(axes.flatten())
-
-    for ax, column in zip(axes, categorical_columns):
-        counts = df[column].fillna("Missing").astype(str).value_counts()
-
-        # Keep the figure readable when a feature has many categories.
-        if len(counts) > top_n:
-            top_counts = counts.head(top_n)
-            other_count = counts.iloc[top_n:].sum()
-            counts = pd.concat([
-                top_counts,
-                pd.Series({"Other": other_count})
-            ])
-
+    for ax, column in zip(axes, columns):
+        counts = df[column].value_counts(dropna=False).head(top_n)
         counts = counts.sort_values()
 
-        ax.barh(counts.index, counts.values, color=FORMAL_COLORS["gold"])
-        ax.set_title(column)
+        bars = ax.barh(counts.index.astype(str), counts.values, color=bar_color, alpha=0.9)
+
+        max_value = counts.values.max()
+        ax.set_xlim(0, max_value * 1.15)
+
+        for bar in bars:
+            width = bar.get_width()
+            ax.text(
+                width + max_value * 0.015,
+                bar.get_y() + bar.get_height() / 2,
+                f"{int(width)}",
+                va="center",
+                ha="left",
+                fontsize=9
+            )
+
+        ax.set_title(column, fontweight="bold", fontsize=12)
         ax.set_xlabel("Count")
-        ax.set_ylabel("Category")
+        ax.grid(axis="x", alpha=0.2)
 
-        # Add count labels next to each bar.
-        for index, value in enumerate(counts.values):
-            ax.text(value, index, f" {value}", va="center")
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
 
-    for ax in axes[n_plots:]:
+    for ax in axes[len(columns):]:
         ax.axis("off")
 
-    fig.suptitle(f"Categorical Feature Counts - Top {top_n}", fontsize=16, fontweight="bold")
-
-    return
-
+    plt.tight_layout()
+    plt.show()

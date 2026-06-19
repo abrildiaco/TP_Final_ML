@@ -1,0 +1,37 @@
+Caso 1: ella editó y quiere subirlo
+En la compu de ella:
+
+git switch -c rama-amiga
+git add .
+git commit -m "Cambios de amiga"
+git push -u origin rama-amiga
+
+Ahora esos cambios están en GitHub.
+
+Caso 2: vos querés ver los cambios de ella
+En tu compu:
+
+git fetch
+git switch rama-amiga
+
+Si no te deja:
+git switch -c rama-amiga origin/rama-amiga
+
+Caso 3: vos querés trabajar en tu parte
+En tu compu:
+
+git switch main
+git pull
+git switch -c mi-rama
+
+Trabajás, y después:
+
+git add .
+git commit -m "Mis cambios"
+git push -u origin mi-rama
+
+
+Caso 4: quieren juntar todo
+Van a GitHub y hacen Pull Request:
+rama-amiga → main
+mi-rama → main

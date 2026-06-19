@@ -4,7 +4,7 @@ from difflib import SequenceMatcher # Library for measuring string similarity, u
 import numpy as np
 import pandas as pd
 
-
+# ========================= Label Analysis =========================
 def explore_target(y, currency=None):
     """
     Builds an exploratory summary of the target variable.
@@ -53,6 +53,7 @@ def explore_target(y, currency=None):
     return pd.DataFrame(rows)
 
 
+# ========================= Feature Analysis =========================
 def format_value_counts(value_counts, max_items):
     """
     Formats category counts into a readable string.
@@ -236,68 +237,6 @@ def unique_values_summary(df):
     return summary.sort_values("unique_values", ascending=False)
 
 
-def get_constant_columns(df):
-    """
-    Returns columns with one or zero non-missing unique values.
-
-    Arguments:
-        df (pd.DataFrame): dataset to analyze
-
-    Returns:
-        pd.DataFrame: constant columns and their unique values
-    """
-    constant_columns = []
-
-    for column in df.columns:
-        unique_values = df[column].dropna().unique()
-
-        if len(unique_values) <= 1:
-            constant_columns.append({
-                "column": column,
-                "unique_value": unique_values[0] if len(unique_values) == 1 else None,
-            })
-
-    return pd.DataFrame(constant_columns)
-
-
-def models_by_brand(df, brand, brand_col = "Marca", model_col = "Modelo"):
-    """
-    Returns the available models for a selected brand.
-
-    Arguments:
-        df (pd.DataFrame): dataset containing brand and model columns
-        brand (str): brand to inspect
-        brand_col (str): brand column name
-        model_col (str): model column name
-
-    Returns:
-        pd.DataFrame: models for the selected brand with counts and percentages
-    """
-    brand_data = df[
-        df[brand_col].astype(str).str.lower().str.strip()
-        == str(brand).lower().strip()
-    ]
-
-    model_counts = (
-        brand_data[model_col]
-        .fillna("Missing")
-        .astype(str)
-        .value_counts()
-        .reset_index()
-    )
-
-    model_counts.columns = [model_col, "count"]
-
-    if len(brand_data) > 0:
-        model_counts["percentage"] = (
-            model_counts["count"] / len(brand_data) * 100
-        ).round(2)
-    else:
-        model_counts["percentage"] = []
-
-    return model_counts
-
-
 def normalize_category_text(value):
     """
     Normalizes categorical text to make similar values easier to compare.
@@ -394,6 +333,70 @@ def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
     )
 
 
+# ========================= Utils for Initial Preprocessing =========================
+def get_constant_columns(df):
+    """
+    Returns columns with one or zero non-missing unique values.
+
+    Arguments:
+        df (pd.DataFrame): dataset to analyze
+
+    Returns:
+        pd.DataFrame: constant columns and their unique values
+    """
+    constant_columns = []
+
+    for column in df.columns:
+        unique_values = df[column].dropna().unique()
+
+        if len(unique_values) <= 1:
+            constant_columns.append({
+                "column": column,
+                "unique_value": unique_values[0] if len(unique_values) == 1 else None,
+            })
+
+    return pd.DataFrame(constant_columns)
+
+
+# REVISAR SI LA QUEREMOS BORRAR
+def models_by_brand(df, brand, brand_col = "Marca", model_col = "Modelo"):
+    """
+    Returns the available models for a selected brand.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing brand and model columns
+        brand (str): brand to inspect
+        brand_col (str): brand column name
+        model_col (str): model column name
+
+    Returns:
+        pd.DataFrame: models for the selected brand with counts and percentages
+    """
+    brand_data = df[
+        df[brand_col].astype(str).str.lower().str.strip()
+        == str(brand).lower().strip()
+    ]
+
+    model_counts = (
+        brand_data[model_col]
+        .fillna("Missing")
+        .astype(str)
+        .value_counts()
+        .reset_index()
+    )
+
+    model_counts.columns = [model_col, "count"]
+
+    if len(brand_data) > 0:
+        model_counts["percentage"] = (
+            model_counts["count"] / len(brand_data) * 100
+        ).round(2)
+    else:
+        model_counts["percentage"] = []
+
+    return model_counts
+
+
 def invert_category_map(category_map):
     """
     Converts a final-value mapping into a normalized variant mapping.
@@ -416,153 +419,30 @@ def invert_category_map(category_map):
     return inverted_map
 
 
-def apply_semantic_mapping(df, column, category_map):
+def compact_value_counts(df, columns):
     """
-    Applies a manual semantic mapping to a categorical column.
+    Builds a compact table with the frequency of every category
+    for multiple categorical features.
 
     Arguments:
-        df (pd.DataFrame): dataset containing the categorical column
-        column (str): column to clean
-        category_map (dict): dictionary with final values as keys and variants as values
+        df (pd.DataFrame): dataset to analyze
+        columns (list[str]): categorical columns
 
     Returns:
-        pd.DataFrame: dataset with the cleaned categorical column
+        pd.DataFrame: compact frequency table.
     """
-    data = df.copy()
-    inverted_map = invert_category_map(category_map)
+    tables = []
 
-    normalized_column = data[column].apply(normalize_category_text)
-    data[column] = normalized_column.map(inverted_map).fillna(normalized_column)
+    for column in columns:
+        counts = (df[column].value_counts(dropna=False).rename_axis("value").reset_index(name="count"))
 
-    return data
+        counts.columns = [
+            f"{column}",
+            f"{column}_count",
+        ]
 
+        counts = counts.reset_index(drop=True)
 
-def drop_irrelevant_columns(df, columns_to_drop):
-    """
-    Removes columns that do not provide useful information.
+        tables.append(counts)
 
-    Arguments:
-        df (pd.DataFrame): dataset to transform
-        columns_to_drop (list[str]): columns to remove
-
-    Returns:
-        pd.DataFrame: dataset without selected columns
-    """
-    data = df.copy()
-
-    return data.drop(columns=columns_to_drop, errors="ignore")
-
-
-def remove_invalid_values(df, range_rules, copy=True):
-    """
-    Filters rows using numeric range rules.
-
-    Arguments:
-        df (pd.DataFrame): dataset to filter
-        range_rules (dict): column names mapped to minimum and maximum valid values
-        copy (bool): whether to return a copy instead of modifying df in place
-
-    Returns:
-        pd.DataFrame: dataset with rows inside the selected ranges
-    """
-    data = df.copy() if copy else df
-
-    for column, limits in range_rules.items():
-        min_value = limits.get("min", -np.inf)
-        max_value = limits.get("max", np.inf)
-
-        values = pd.to_numeric(data[column], errors="coerce")
-        data = data[(values >= min_value) & (values <= max_value)]
-
-    return data
-
-
-def convert_peso_prices_to_usd(df, price_col = "Precio", currency_col = "Moneda", peso_symbol = "$",
-                               exchange_rate = (895.25 + 913) / 2, copy = True,):
-    """
-    Converts prices in Argentine pesos to USD and removes the currency column.
-
-    Arguments:
-        df (pd.DataFrame): dataset with price and currency columns
-        price_col (str): price column name
-        currency_col (str): currency column name
-        peso_symbol (str): value used to identify Argentine pesos
-        exchange_rate (float): ARS/USD rate used for conversion
-        copy (bool): whether to return a copy instead of modifying df in place
-
-    Returns:
-        pd.DataFrame: dataset with peso prices converted to USD
-    """
-    data = df.copy() if copy else df
-
-    peso_mask = data[currency_col].eq(peso_symbol)
-    data[price_col] = pd.to_numeric(data[price_col])
-    data.loc[peso_mask, price_col] = data.loc[peso_mask, price_col] / exchange_rate
-
-    return data.drop(columns = [currency_col])
-
-
-def map_column_values(df, column, value_map, copy = True):
-    """
-    Maps values from a column using a dictionary.
-
-    Arguments:
-        df (pd.DataFrame): dataset to transform
-        column (str): column to map
-        value_map (dict): original value to mapped value dictionary
-        copy (bool): whether to return a copy instead of modifying df in place
-
-    Returns:
-        pd.DataFrame: dataset with mapped column values
-    """
-    data = df.copy() if copy else df
-
-    data[column] = (
-        data[column]
-        .astype(str)
-        .str.strip()
-        .str.lower()
-        .map(value_map)
-    )
-
-    return data
-
-
-def one_hot_encoding(df, categorical_cols = None, train=True, categories_map=None):
-    """
-    Applies one-hot encoding to categorical columns.
-
-    Arguments:
-        df (pd.DataFrame): dataset to encode
-        categorical_cols (list[str] | None): categorical columns to encode
-        train (bool): whether the dataset is a training set
-        categories_map (dict | None): categories learned from the training set
-
-    Returns:
-        pd.DataFrame | tuple[pd.DataFrame, dict]: encoded dataset and, during training, learned categories
-    """
-    data = df.copy()
-    categorical_cols = categorical_cols or []
-
-    if train:
-        categories_map = {}
-
-        for column in categorical_cols:
-            categories_map[column] = sorted(data[column].dropna().unique())
-
-            # Learn categories only from the training data
-            for category in categories_map[column]:
-                data[f"{column}_{category}"] = (data[column] == category).astype(int)
-
-            data = data.drop(columns=[column])
-
-        return data, categories_map
-
-    for column in categorical_cols:
-        # Reuse training categories so validation and test keep the same columns
-        for category in categories_map[column]:
-            data[f"{column}_{category}"] = (data[column] == category).astype(int)
-
-        data = data.drop(columns=[column])
-
-    return data
+    return pd.concat(tables, axis=1)

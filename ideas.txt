@@ -35,7 +35,7 @@ Objetivo: dejar los datos comparables y listos para sacar conclusiones.
 - Revisar Moneda: 👍
   convertir todos los precios a una misma moneda.
 
-- Limpieza semántica -> Automática/automatica pasarlo a UNA. Lo mismo con COLOR. Unificar sinonimos
+- Limpieza semántica -> Automática/automatica pasarlo a UNA. Lo mismo con COLOR. Unificar sinonimos 👍
   "dos categorías distintas representan exactamente la misma información."
 
 - Modelo/Version: Modelos/Version con menos de 10/20 publicaciones pasan a ser 'Other' asi el modelo no aprende rudio

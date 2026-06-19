@@ -1,0 +1,8 @@
+QUE HICIMOS CON LAS FEATURES EN EL Preprocesamiento
+
+1) unnamed --> borrada
+2) tipo de carroceria -> borrada
+3) moneda -> borrada luego de pasar tood a dolares
+4) kilometros -> pasamos de str a float
+5) camara -> var binaria
+6) marca, modelo, color, tipo vendedor, combustible, transimision --> ONE HOT
