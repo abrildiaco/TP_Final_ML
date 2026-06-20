@@ -41,13 +41,13 @@ Objetivo: dejar los datos comparables y listos para sacar conclusiones.
 - Modelo/Version: Modelos/Version con menos de 10/20 publicaciones pasan a ser 'Other' asi el modelo no aprende rudio
   CONSIDERAR ELIMINAR VERSION -> VER CORRELACION CON EL PRECIO
 
-- Motor: pasar de 2.0 Turbo a 2.0 y tartarlo como numerica
+- Motor: pasar de 2.0 Turbo a 2.0 y tartarlo como numerica 👍
 
 - Titulo: considerar eliminarla. Tiene muchísimo texto redundante. Además repite marca, modelo y version
 
 - Descripcion: tambien considerar eliminarla. Aunqie se puede hacer NLP
 
-- Convertir variables a numericas:
+- Convertir variables a numericas: 👍
   Precio, Año, Puertas y Kilometros.
   -> Tipo de vendedor, Marca, Color, Tipo de Combiustible con ONE-HOT
 
@@ -56,7 +56,7 @@ Objetivo: dejar los datos comparables y listos para sacar conclusiones.
   km_por_año = Kilómetros / Edad
   Marca_Modelo
 
-- Limpiar categorias:
+- Limpiar categorias: 👍
   Normalizar Marca, Modelo, Color, Transmision, Combustible y Tipo de vendedor.
 
 - Revisar si los nulos de "Con camara de retroceso" tienen relacion con el Año:
@@ -76,7 +76,7 @@ Objetivo: dejar los datos comparables y listos para sacar conclusiones.
   Considerar usar log(Precio) para reducir el impacto de valores extremos.
   Decidir que hacer con outliers que no tienen sentido.
 
-- ENCODING (opciones):
+- ENCODING (opciones): 👍
   1) One Hot: Sirve perfecto para ridge, lasso, redes, knn
       - marca, modelo, color, tipo vendedor, combustible, transimision
   2) Label Encoding: Para árboles (Random Forest, XGBoost)
@@ -148,10 +148,7 @@ Objetivo: entender la estructura global del dataset.
   Proyectar autos en dos dimensiones usando features numericas y categoricas codificadas.
   Colorear por Precio o log(Precio).
 
-- UMAP a 2D:
-  Similar a PCA, pero puede capturar relaciones no lineales.
-
-- Scatter PCA/UMAP coloreado por:
+- Scatter PCA coloreado por:
   Precio, Marca, age o Tipo de vendedor.
 
 
@@ -209,19 +206,3 @@ Objetivo: responder preguntas ajustadas por las caracteristicas del auto.
 6. Marca con menor dispersion de precios:
    Primero ranking de IQR por Marca.
    Luego ranking de desviacion de residuos por Marca.
-
-IDEA Motor
-1, 1.0, 1.0T, 1.0 turbo, 1.0 tsi -> cilindrada 1.0
-1.2, 1.2 turbo -> cilindrada 1.2
-1.3, 1.3T, 1.3 Turbo, T270 1.3 -> cilindrada 1.3
-1.4, 1.4 TSI, 1.4tsi -> cilindrada 1.4
-1.5, 1500, 1.5T, 1.5 Turbo -> cilindrada 1.5
-1.6, 1600, 1.6 MSI, 1.6T -> cilindrada 1.6
-2, 2.0, 2.0T, 2.0 TDI, 2.0 TSI -> cilindrada 2.0
-2.8, 2.8TDI, Motor 2.8 turbo diesel -> cilindrada 2.8}
-
-engine_liters
-engine_size_group
-engine_has_turbo
-engine_is_hybrid_or_electric
-engine_is_diesel_hint

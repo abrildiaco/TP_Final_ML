@@ -94,50 +94,27 @@ def train_val_split_stratified(X, y, stratify_by, train_size = 0.80, random_stat
     return (X_train, y_train), (X_val, y_val)
 
 
-# ========================= Optional Stratification Strategies =========================
-
-def make_price_bins(y, n_bins=5):
+# ========================= Split Diagnostics =========================
+def split_size_summary(X_train, X_val):
     """
-    Creates quantile-based price bins for stratified regression splits.
+    Summarizes the number and percentage of observations in each split.
 
     Arguments:
-        y (pd.Series | np.ndarray): target price variable
-        n_bins (int): number of quantile bins to create
+        X_train (pd.DataFrame | np.ndarray): training features
+        X_val (pd.DataFrame | np.ndarray): validation features
 
     Returns:
-        pd.Series: price bin assigned to each observation
+        pd.DataFrame: split size summary
     """
-    prices = pd.to_numeric(pd.Series(y), errors="coerce")
+    train_size = len(X_train)
+    val_size = len(X_val)
+    total_size = train_size + val_size
 
-    return pd.qcut(
-        prices,
-        q=n_bins,
-        labels=False,
-        duplicates="drop",
-    ).astype("Int64").astype(str)
-
-
-def make_brand_price_groups(X, y, brand_column="Marca", n_price_bins=4, min_count=10):
-    """
-    Creates combined brand and price-bin stratification groups.
-
-    Arguments:
-        X (pd.DataFrame): feature matrix containing the brand column
-        y (pd.Series | np.ndarray): target price variable
-        brand_column (str): brand column name
-        n_price_bins (int): number of price bins to create
-        min_count (int): minimum group frequency before grouping as Other
-
-    Returns:
-        pd.Series: combined stratification group values
-    """
-    brand = X[brand_column].fillna("Unknown").astype(str)
-    price_bins = make_price_bins(y, n_bins=n_price_bins)
-
-    stratification_groups = brand + "_price_bin_" + price_bins
-
-    # Very small groups make validation/test splits unstable
-    group_counts = stratification_groups.value_counts()
-    rare_groups = group_counts[group_counts < min_count].index
-
-    return stratification_groups.where(~stratification_groups.isin(rare_groups), other = "Other")
+    return pd.DataFrame({
+        "split": ["train", "validation"],
+        "rows": [train_size, val_size],
+        "percentage": [
+            round(train_size / total_size * 100, 2),
+            round(val_size / total_size * 100, 2),
+        ],
+    })

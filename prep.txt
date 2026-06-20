@@ -14,6 +14,7 @@ QUE HICIMOS CON LAS FEATURES EN EL Preprocesamiento
 12) Años -> NADA, es numerica
 13) Puertas -> NADA, es numerica
 14) motor --> borrada
+15) nuevas col: cilindrada tamaño cilindrada, tiene motor
 
 FALTAN:
 1) Descripcion
