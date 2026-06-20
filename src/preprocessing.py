@@ -1,7 +1,12 @@
+import re # For regex operations in engine feature extraction
+
 import numpy as np
 import pandas as pd
-import re
+
 from eda_utils import normalize_category_text, invert_category_map
+
+
+# ========================= Column Selection =========================
 
 def drop_irrelevant_columns(df, columns_to_drop):
     """
@@ -18,6 +23,8 @@ def drop_irrelevant_columns(df, columns_to_drop):
 
     return data.drop(columns=columns_to_drop, errors="ignore")
 
+
+# ========================= Value Filtering =========================
 
 def remove_invalid_values(df, range_rules, copy=True):
     """
@@ -37,14 +44,16 @@ def remove_invalid_values(df, range_rules, copy=True):
         min_value = limits.get("min", -np.inf)
         max_value = limits.get("max", np.inf)
 
+        # Convert values before filtering to avoid comparing strings with numbers
         values = pd.to_numeric(data[column], errors="coerce")
         data = data[(values >= min_value) & (values <= max_value)]
 
     return data
 
 
-def convert_peso_prices_to_usd(df, price_col = "Precio", currency_col = "Moneda", peso_symbol = "$",
-                               exchange_rate = (895.25 + 913) / 2, copy = True,):
+# ========================= Price Transformation =========================
+
+def convert_peso_prices_to_usd(df, price_col="Precio", currency_col="Moneda", peso_symbol="$", exchange_rate=(895.25 + 913) / 2, copy=True):
     """
     Converts prices in Argentine pesos to USD and removes the currency column.
 
@@ -62,11 +71,13 @@ def convert_peso_prices_to_usd(df, price_col = "Precio", currency_col = "Moneda"
     data = df.copy() if copy else df
 
     peso_mask = data[currency_col].eq(peso_symbol)
-    data[price_col] = pd.to_numeric(data[price_col])
+    data[price_col] = pd.to_numeric(data[price_col], errors="coerce")
     data.loc[peso_mask, price_col] = data.loc[peso_mask, price_col] / exchange_rate
 
-    return data.drop(columns = [currency_col])
+    return data.drop(columns=[currency_col])
 
+
+# ========================= Numeric Text Extraction =========================
 
 def extract_first_integer(value):
     """
@@ -90,6 +101,8 @@ def extract_first_integer(value):
         return np.nan
 
 
+# ========================= Categorical Mapping =========================
+
 def apply_semantic_mapping(df, column, category_map):
     """
     Applies a manual semantic mapping to a categorical column.
@@ -105,18 +118,51 @@ def apply_semantic_mapping(df, column, category_map):
     data = df.copy()
     inverted_map = invert_category_map(category_map)
 
+    # Normalize text before applying the manual mapping
     normalized_column = data[column].apply(normalize_category_text)
     data[column] = normalized_column.map(inverted_map).fillna(normalized_column)
 
     return data
 
 
+def map_column_values(df, column, value_map):
+    """
+    Maps values from a column using a dictionary.
+
+    Arguments:
+        df (pd.DataFrame): dataset to transform
+        column (str): column to map
+        value_map (dict): original value to mapped value dictionary
+
+    Returns:
+        pd.DataFrame: dataset with mapped column values
+    """
+    data = df.copy()
+
+    data[column] = (
+        data[column]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+        .map(value_map)
+    )
+
+    return data
+
+
+# ========================= Engine Feature Extraction =========================
+
 def extract_engine_liters(value, require_engine_context=False, allow_start_number=False):
     """
     Extracts engine displacement in liters from a text value.
 
-    If require_engine_context=True, it only extracts values that appear with
-    reliable engine-related patterns.
+    Arguments:
+        value (object): text value containing engine information
+        require_engine_context (bool): whether to require engine-related patterns
+        allow_start_number (bool): whether to allow a number at the beginning of the text
+
+    Returns:
+        float: engine displacement in liters or np.nan if it cannot be extracted
     """
     if pd.isna(value):
         return np.nan
@@ -130,7 +176,7 @@ def extract_engine_liters(value, require_engine_context=False, allow_start_numbe
             r"\b\d\.\d\s*(?:l|t|turbo|tsi|tdi|thp|vti|tce|hdi|tfsi|fsi|hibrida|hibrido|hybrid)\b",
             r"\b\d\.\d(?:t)\b",
             r"\b\d{4}\s*cc\b",
-            r"\b\d\.\d\s*(?:cv|hp)\b"
+            r"\b\d\.\d\s*(?:cv|hp)\b",
         ]
 
         if allow_start_number:
@@ -138,6 +184,7 @@ def extract_engine_liters(value, require_engine_context=False, allow_start_numbe
 
         matches = []
 
+        # Keep only reliable fragments before extracting numbers
         for pattern in patterns:
             matches.extend(re.findall(pattern, text))
 
@@ -146,7 +193,7 @@ def extract_engine_liters(value, require_engine_context=False, allow_start_numbe
 
         text = " ".join(matches)
 
-    # Separate numbers from letters
+    # Separate numbers from letters so values like 1.6tsi can be read
     text = re.sub(r"(\d)([a-zA-Z])", r"\1 \2", text)
     text = re.sub(r"([a-zA-Z])(\d)", r"\1 \2", text)
 
@@ -155,25 +202,32 @@ def extract_engine_liters(value, require_engine_context=False, allow_start_numbe
     for number_text in numbers:
         number = float(number_text)
 
-        # Values like 1.4, 2.0, 3.6 usually represent liters
         if 0.8 <= number <= 8.0:
             return round(number, 1)
 
-        # Values like 1400, 1600, 2000 usually represent cubic centimeters
         if 800 <= number <= 8000:
             return round(number / 1000, 1)
 
     return np.nan
 
 
-def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", "Descripción", "Versión"), version_col="Versión", return_audit=True,):
+def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", "Descripción", "Versión"), version_col="Versión", return_audit=True):
     """
     Fills missing engine values using reliable engine patterns found in text columns.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing engine and text columns
+        engine_col (str): engine column name
+        text_cols (tuple[str]): text columns used to search for engine information
+        version_col (str): version column name
+        return_audit (bool): whether to return a table with the filling process
+
+    Returns:
+        pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]: transformed dataset and optional audit table
     """
     data = df.copy()
 
     missing_mask = data[engine_col].isna()
-
     extracted_liters = pd.Series(np.nan, index=data.index)
 
     if version_col in data.columns:
@@ -187,9 +241,9 @@ def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", 
 
     text_source = pd.Series("", index=data.index)
 
-    for col in text_cols:
-        if col in data.columns and col != version_col:
-            text_source = text_source + " " + data[col].fillna("").astype(str)
+    for column in text_cols:
+        if column in data.columns and column != version_col:
+            text_source = text_source + " " + data[column].fillna("").astype(str)
 
     extracted_from_text = text_source.apply(
         lambda value: extract_engine_liters(
@@ -203,7 +257,8 @@ def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", 
 
     fill_mask = missing_mask & extracted_liters.notna()
 
-    data.loc[fill_mask, engine_col] = extracted_liters[fill_mask].astype(str)
+    # Keep extracted engine values numeric
+    data.loc[fill_mask, engine_col] = extracted_liters.loc[fill_mask].astype(str)
 
     audit_table = pd.DataFrame({
         "row_index": data.index,
@@ -272,59 +327,11 @@ def has_turbo(value, turbo_patterns):
     return int(bool(re.search(pattern, text)))
 
 
-# NO SE USA ESTA FUNCION
-def add_engine_numeric_features(df, engine_col="Motor", turbo_patterns=None):
-    """
-    Creates numeric engine features from a raw engine text column.
-
-    Arguments:
-        df (pd.DataFrame): dataset containing the engine column
-        engine_col (str): raw engine column name
-        turbo_patterns (list[str] | None): regex patterns that indicate turbo
-
-    Returns:
-        pd.DataFrame: dataset with numeric engine features
-    """
-    data = df.copy()
-
-    data["engine_liters"] = data[engine_col].apply(extract_engine_liters)
-    data["engine_size_group_code"] = data["engine_liters"].apply(encode_engine_size)
-    data["engine_has_turbo"] = data[engine_col].apply(
-        lambda value: has_turbo(value, turbo_patterns=turbo_patterns)
-    )
-
-    return data
-
-
-def map_column_values(df, column, value_map):
-    """
-    Maps values from a column using a dictionary.
-
-    Arguments:
-        df (pd.DataFrame): dataset to transform
-        column (str): column to map
-        value_map (dict): original value to mapped value dictionary
-        copy (bool): whether to return a copy instead of modifying df in place
-
-    Returns:
-        pd.DataFrame: dataset with mapped column values
-    """
-    data = df.copy()
-
-    data[column] = (
-        data[column]
-        .astype(str)
-        .str.strip()
-        .str.lower()
-        .map(value_map)
-    )
-
-    return data
-
+# ========================= Encoding =========================
 
 def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None):
     """
-    Applies one-hot encoding to multiple categorical columns
+    Applies one-hot encoding to multiple categorical columns.
 
     Arguments:
         df (pd.DataFrame): dataset to encode
@@ -333,8 +340,7 @@ def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None)
         categories_map (dict | None): categories learned from the training set
 
     Returns:
-        If train=True: encoded dataframe and categories learned from train.
-        If train=False: encoded dataframe using train categories.
+        pd.DataFrame | tuple[pd.DataFrame, dict]: encoded dataset and, during training, learned categories
     """
     data = df.copy()
     categorical_cols = categorical_cols or []
@@ -354,9 +360,9 @@ def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None)
         column_data = data[column].astype(str)
 
         dummies = pd.get_dummies(column_data, prefix=column, dtype=int)
-
         expected_columns = [f"{column}_{category}" for category in categories_map[column]]
 
+        # Force validation and test to keep the same dummy columns as train
         dummies = dummies.reindex(columns=expected_columns, fill_value=0)
 
         encoded_parts.append(dummies)
@@ -366,5 +372,56 @@ def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None)
 
     if train:
         return data, categories_map
+
+    return data
+
+
+# Prueba
+def fill_missing_from_text(df, target_col, text_cols, extractor, return_audit=True):
+    """
+    Fills missing values in a target column using information extracted from text columns.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing the target and text columns
+        target_col (str): column with missing values to fill
+        text_cols (tuple[str] | list[str]): text columns used as information source
+        extractor (callable): function that receives text and returns an extracted value
+        return_audit (bool): whether to return a table with the filling process
+
+    Returns:
+        pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]: transformed dataset and optional audit table
+    """
+    data = df.copy()
+
+    missing_mask = data[target_col].isna()
+
+    text_source = pd.Series("", index=data.index)
+
+    # Combine all available text columns into one searchable text source
+    for column in text_cols:
+        if column in data.columns:
+            text_source = text_source + " " + data[column].fillna("").astype(str)
+
+    extracted_values = text_source.apply(extractor)
+
+    fill_mask = missing_mask & extracted_values.notna()
+
+    data.loc[fill_mask, target_col] = extracted_values.loc[fill_mask]
+
+    audit_table = pd.DataFrame({
+        "row_index": data.index,
+        "extracted_value": extracted_values,
+        "was_missing": missing_mask,
+        "was_filled": fill_mask,
+    })
+
+    audit_table = audit_table[audit_table["was_missing"]].reset_index(drop=True)
+
+    print(f"Missing rows in '{target_col}': {missing_mask.sum()}")
+    print(f"Filled from text: {fill_mask.sum()}")
+    print(f"Still missing after text search: {missing_mask.sum() - fill_mask.sum()}")
+
+    if return_audit:
+        return data, audit_table
 
     return data

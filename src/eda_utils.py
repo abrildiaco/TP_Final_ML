@@ -1,11 +1,12 @@
-import unicodedata # Library for normalizing text, used in semantic repetition detection
-from difflib import SequenceMatcher # Library for measuring string similarity, used in semantic repetition detection
-import re # Library for regular expressions, used in text normalization and feature extraction
+import unicodedata  # Library for normalizing text
+from difflib import SequenceMatcher  # Library for measuring string similarity
 
 import numpy as np
 import pandas as pd
 
-# ========================= Label Analysis =========================
+
+# ========================= Target Analysis =========================
+
 def explore_target(y, currency=None):
     """
     Builds an exploratory summary of the target variable.
@@ -54,7 +55,8 @@ def explore_target(y, currency=None):
     return pd.DataFrame(rows)
 
 
-# ========================= Feature Analysis =========================
+# ========================= Feature Summaries =========================
+
 def format_value_counts(value_counts, max_items):
     """
     Formats category counts into a readable string.
@@ -238,6 +240,32 @@ def unique_values_summary(df):
     return summary.sort_values("unique_values", ascending=False)
 
 
+def get_constant_columns(df):
+    """
+    Returns columns with one or zero non-missing unique values.
+
+    Arguments:
+        df (pd.DataFrame): dataset to analyze
+
+    Returns:
+        pd.DataFrame: constant columns and their unique values
+    """
+    constant_columns = []
+
+    for column in df.columns:
+        unique_values = df[column].dropna().unique()
+
+        if len(unique_values) <= 1:
+            constant_columns.append({
+                "column": column,
+                "unique_value": unique_values[0] if len(unique_values) == 1 else None,
+            })
+
+    return pd.DataFrame(constant_columns)
+
+
+# ========================= Semantic Category Inspection =========================
+
 def normalize_category_text(value):
     """
     Normalizes categorical text to make similar values easier to compare.
@@ -295,7 +323,7 @@ def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
             for other_category in categories:
                 if other_category in used_categories:
                     continue
-                
+
                 # Calculate similarity between normalized category values
                 similarity = SequenceMatcher(
                     None,
@@ -334,32 +362,30 @@ def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
     )
 
 
-# ========================= Utils for Initial Preprocessing =========================
-def get_constant_columns(df):
+def invert_category_map(category_map):
     """
-    Returns columns with one or zero non-missing unique values.
+    Converts a final-value mapping into a normalized variant mapping.
 
     Arguments:
-        df (pd.DataFrame): dataset to analyze
+        category_map (dict): dictionary with final values as keys and variants as values
 
     Returns:
-        pd.DataFrame: constant columns and their unique values
+        dict: normalized variant to normalized final value mapping
     """
-    constant_columns = []
+    inverted_map = {}
 
-    for column in df.columns:
-        unique_values = df[column].dropna().unique()
+    for final_value, variants in category_map.items():
+        final_value_norm = normalize_category_text(final_value)
 
-        if len(unique_values) <= 1:
-            constant_columns.append({
-                "column": column,
-                "unique_value": unique_values[0] if len(unique_values) == 1 else None,
-            })
+        for variant in variants:
+            variant_norm = normalize_category_text(variant)
+            inverted_map[variant_norm] = final_value_norm
 
-    return pd.DataFrame(constant_columns)
+    return inverted_map
 
 
-# REVISAR SI LA QUEREMOS BORRAR
+# ========================= Specific Inspection Helpers =========================
+
 def models_by_brand(df, brand, brand_col = "Marca", model_col = "Modelo"):
     """
     Returns the available models for a selected brand.
@@ -398,32 +424,18 @@ def models_by_brand(df, brand, brand_col = "Marca", model_col = "Modelo"):
     return model_counts
 
 
-def invert_category_map(category_map):
-    """
-    Converts a final-value mapping into a normalized variant mapping.
-
-    Arguments:
-        category_map (dict): dictionary with final values as keys and variants as values
-
-    Returns:
-        dict: normalized variant to normalized final value mapping
-    """
-    inverted_map = {}
-
-    for final_value, variants in category_map.items():
-        final_value_norm = normalize_category_text(final_value)
-
-        for variant in variants:
-            variant_norm = normalize_category_text(variant)
-            inverted_map[variant_norm] = final_value_norm
-
-    return inverted_map
-
-# TTTTTTEEEEEESSSSSTTTTTT
 def print_missing_feature_text(df, feature_col, text_cols=("Título", "Descripción"), max_rows=None):
     """
     Prints text columns for rows where a selected feature is missing.
-    Detects both real NaN values and text values like 'missing'.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing the selected feature and text columns
+        feature_col (str): feature used to detect missing rows
+        text_cols (tuple[str]): text columns to print for manual inspection
+        max_rows (int | None): maximum number of missing rows to print
+
+    Returns:
+        None
     """
     missing_mask = (
         df[feature_col].isna()
@@ -452,6 +464,3 @@ def print_missing_feature_text(df, feature_col, text_cols=("Título", "Descripci
                 print()
 
         print("=" * 100)
-
-
-
