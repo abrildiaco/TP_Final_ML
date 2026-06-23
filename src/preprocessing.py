@@ -503,19 +503,7 @@ def add_text_indicator_features(df, text_cols, terms_map, prefix="", drop_text_c
     return data
 
 
-def fill_missing_with_feature_name(df, columns=None, prefix="missing_"):
-    """
-    Fills missing values with a feature-specific placeholder string.
-
-    Arguments:
-        df (pd.DataFrame): dataset to transform
-        columns (list[str] | None): columns to fill; if None, all object,
-            category, and string columns are used
-        prefix (str): prefix added to each column name to build the placeholder
-
-    Returns:
-        pd.DataFrame: dataset with selected missing values filled
-    """
+def fill_missing_with_value(df, columns=None, value="missing"):
     data = df.copy()
 
     if columns is None:
@@ -524,10 +512,9 @@ def fill_missing_with_feature_name(df, columns=None, prefix="missing_"):
         ).columns.tolist()
 
     for column in columns:
-        placeholder = f"{prefix}{column}"
         data[column] = data[column].astype("object")
         missing_mask = _build_missing_mask(data[column])
-        data.loc[missing_mask, column] = placeholder
+        data.loc[missing_mask, column] = value
 
     return data
 
