@@ -3,7 +3,7 @@
 # 1. Antes de preprocesar
 Objetivo: entender como viene el dataset y detectar problemas de calidad.
 
-- Ver frecuencias de categorias:
+- Ver frecuencias de categorias: 👍
   Marca, Modelo, Color, Tipo de combustible, Transmision, Moneda y Tipo de vendedor.
 
 - Ver valores faltantes por columna: 👍
@@ -65,7 +65,7 @@ Objetivo: dejar los datos comparables y listos para sacar conclusiones.
 - Mirar histogramas de variables importantes:
   Evaluar si aplicar logaritmo ayuda a obtener distribuciones mas parecidas a una gaussiana.
 
-- Tratar valores faltantes:
+- Tratar valores faltantes: 👍
   Si falta Precio, eliminar la fila.
   Si faltan categoricas, imputar como "Unknown" o evaluar si conviene eliminar.
   Si faltan numericas, imputar despues del train/test split si se usan para modelado.
