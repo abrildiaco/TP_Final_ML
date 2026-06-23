@@ -1,9 +1,30 @@
 import unicodedata  # Library for normalizing text
 from difflib import SequenceMatcher  # Library for measuring string similarity
-import re # For regex operations in engine feature extraction
+import re  # For regex operations in engine feature extraction
 
 import numpy as np
 import pandas as pd
+
+
+# =========================  Private Helpers  =========================
+
+def _build_missing_mask(series, extra_missing=("missing",)):
+    """
+    Returns a boolean mask that is True wherever a Series value should be
+    considered missing — either a real NaN or a placeholder string like
+    "missing". Centralizing this logic means the definition of "missing"
+    only needs to change in one place.
+
+    Arguments:
+        series (pd.Series): column to evaluate
+        extra_missing (tuple[str]): additional string values treated as missing,
+            compared in a case-insensitive, stripped manner
+
+    Returns:
+        pd.Series[bool]: True where the value is considered missing
+    """
+    normalized = {v.strip().lower() for v in extra_missing}
+    return series.isna() | series.astype(str).str.strip().str.lower().isin(normalized)
 
 
 # ========================= Target Analysis =========================
@@ -203,39 +224,28 @@ def duplicate_rows_summary(df):
 
 def missing_values_summary(df, missing_values=("missing",)):
     """
-    Returns the number and percentage of missing values per column.
+    Returns the number and percentage of missing values per column,
+    treating both real NaN and placeholder strings as missing.
 
     Arguments:
         df (pd.DataFrame): dataset to analyze
         missing_values (tuple[str]): text values treated as missing
 
     Returns:
-        pd.DataFrame: missing values summary
+        pd.DataFrame: missing values summary, sorted by percentage descending
     """
-    normalized_missing_values = {
-        normalize_category_text(value)
-        for value in missing_values
-    }
-
     rows = []
 
     for column in df.columns:
         series = df[column]
 
-        missing_mask = series.isna()
-
         if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
-            normalized_series = series.apply(
-                lambda value: (
-                    np.nan
-                    if pd.isna(value)
-                    else normalize_category_text(value)
-                )
+            # Normalize text columns so placeholder strings are caught by _build_missing_mask
+            series = series.apply(
+                lambda value: np.nan if pd.isna(value) else normalize_category_text(value)
             )
 
-            missing_mask = missing_mask | normalized_series.isin(normalized_missing_values)
-
-        missing_count = missing_mask.sum()
+        missing_count = _build_missing_mask(series, extra_missing=missing_values).sum()
 
         if missing_count > 0:
             rows.append({
@@ -249,6 +259,7 @@ def missing_values_summary(df, missing_values=("missing",)):
         .sort_values("missing_percentage", ascending=False)
         .reset_index(drop=True)
     )
+
 
 def unique_values_summary(df):
     """
@@ -298,12 +309,15 @@ def get_constant_columns(df):
 def normalize_category_text(value):
     """
     Normalizes categorical text to make similar values easier to compare.
+    Converts to lowercase, removes accents, and collapses irregular spacing
+    and separators so that variants like "Blanco", "blanca", and "blanco "
+    all map to the same string.
 
     Arguments:
         value (object): original category value
 
     Returns:
-        str: normalized category value
+        str: normalized category value, or "missing" if the input is NaN
     """
     if pd.isna(value):
         return "missing"
@@ -319,7 +333,8 @@ def normalize_category_text(value):
 
 def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
     """
-    Finds groups of categories that are similar or almost identical.
+    Finds groups of categories that are similar or almost identical,
+    helping identify variants that should be merged before modeling.
 
     Arguments:
         df (pd.DataFrame): dataset containing categorical columns
@@ -393,13 +408,14 @@ def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
 
 def invert_category_map(category_map):
     """
-    Converts a final-value mapping into a normalized variant mapping.
+    Converts a canonical-value mapping into a normalized variant-to-canonical
+    mapping, ready to be used with Series.map().
 
     Arguments:
-        category_map (dict): dictionary with final values as keys and variants as values
+        category_map (dict): canonical values as keys, lists of accepted variants as values
 
     Returns:
-        dict: normalized variant to normalized final value mapping
+        dict: normalized variant -> normalized canonical value
     """
     inverted_map = {}
 
@@ -414,28 +430,33 @@ def invert_category_map(category_map):
 
 
 # ========================= Specific Inspection Helpers =========================
-def count_category_mentions_in_text(df, target_col, text_cols, category_map, ignored_categories=("missing", "otros")):
+
+def count_category_mentions_in_text(df, target_col, text_cols, category_map, ignored_categories=("missing", "otros"),
+                                    only_missing_target=False, only_rows_with_mentions=False):
     """
-    Counts semantic category mentions inside text columns and compares missing target rows.
+    Searches for category mentions inside text columns and returns a row-level
+    table indicating which categories were found. Used to recover missing values
+    from free-text fields like titles and descriptions.
 
     Arguments:
         df (pd.DataFrame): dataset containing target and text columns
         target_col (str): column used to identify missing rows
         text_cols (tuple[str] | list[str]): text columns to search in
-        category_map (dict): dictionary with final values as keys and variants as values
+        category_map (dict): canonical values as keys, lists of accepted variants as values
         ignored_categories (tuple[str]): mapped categories excluded from the count
+        only_missing_target (bool): if True, searches only rows where target_col is missing
+        only_rows_with_mentions (bool): if True, returns only rows with at least one mention
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: category summary and row-level mentions
+        pd.DataFrame: row-level table with matched categories and mention counts
     """
-    inverted_map = invert_category_map(category_map)
-
     variant_to_category = {}
+    ignored_normalized = {normalize_category_text(c) for c in ignored_categories}
 
     for final_value, variants in category_map.items():
         final_norm = normalize_category_text(final_value)
 
-        if final_norm in ignored_categories:
+        if final_norm in ignored_normalized:
             continue
 
         variant_to_category[final_norm] = final_norm
@@ -444,15 +465,21 @@ def count_category_mentions_in_text(df, target_col, text_cols, category_map, ign
             variant_norm = normalize_category_text(variant)
             variant_to_category[variant_norm] = final_norm
 
+    # Sort longer variants first so "marcha atras" is matched before "marcha"
     variants = sorted(
         variant_to_category,
         key=lambda value: len(value.split()),
         reverse=True
     )
 
+    missing_col = f"{target_col}_is_missing"
+    missing_target_mask = _build_missing_mask(df[target_col])
+
+    rows_to_search = df[missing_target_mask] if only_missing_target else df
+
     rows = []
 
-    for row_index, row in df.iterrows():
+    for row_index, row in rows_to_search.iterrows():
         text = " ".join(
             str(row[col])
             for col in text_cols
@@ -470,65 +497,125 @@ def count_category_mentions_in_text(df, target_col, text_cols, category_map, ign
             for _ in matches:
                 mentions.append(variant_to_category[variant])
 
-        is_missing_target = (
-            pd.isna(row[target_col])
-            or normalize_category_text(row[target_col]) == "missing"
-        )
+        if only_rows_with_mentions and len(mentions) == 0:
+            continue
 
         rows.append({
             "row_index": row_index,
-            f"{target_col}_is_missing": is_missing_target,
+            missing_col: missing_target_mask.loc[row_index],
             "matched_categories": " | ".join(sorted(set(mentions))),
             "n_category_mentions": len(mentions),
         })
 
-    row_mentions = pd.DataFrame(rows)
+    return pd.DataFrame(rows)
 
-    if row_mentions.empty:
-        summary = pd.DataFrame(columns=[
-            "category",
-            "mention_count",
-            "row_count",
-            "missing_target_mention_count",
-            "missing_target_row_count",
-        ])
-        return summary, row_mentions
 
-    exploded = (
-        row_mentions
-        .assign(category=row_mentions["matched_categories"].str.split(" | "))
-        .explode("category")
+def frequent_words_table(df, text_cols, top_n=30, min_word_length=3, stop_words=None):
+    """
+    Counts the most frequent words across selected text columns.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing the text columns
+        text_cols (tuple[str] | list[str]): text columns to analyze
+        top_n (int): number of words to return
+        min_word_length (int): minimum word length to include
+        stop_words (set[str] | list[str] | None): words to exclude; if None,
+            a small default Spanish stopword list is used
+
+    Returns:
+        pd.DataFrame: table with word and count columns
+    """
+    default_stop_words = {
+        "con", "del", "las", "los", "una", "uno", "unos", "unas",
+        "para", "por", "que", "sin", "como", "mas", "muy", "esta",
+        "este", "estos", "estas", "sobre", "todo", "todas", "todos",
+        "desde", "hasta", "solo", "tambien", "sus", "son", "ser",
+        "fue", "hay", "tiene", "tienen", "km", "kms", "y", "el", "la",
+        "financiacion", "precio", "vehiculo", "vehiculos", "auto",
+        "mejor", "cuotas", "entrega", "oficial", "pago",
+        "concesionario", "tomamos", "inmediata", "mercado", "valor",
+        "anos", "fijas", "stock", "dia"
+    }
+
+    if stop_words is None:
+        stop_words = default_stop_words
+    else:
+        stop_words = {normalize_category_text(word) for word in stop_words}
+
+    text = " ".join(
+        df[column].dropna().astype(str).str.cat(sep=" ")
+        for column in text_cols
+        if column in df.columns
     )
 
-    exploded = exploded[
-        exploded["category"].notna()
-        & exploded["category"].ne("")
+    normalized_text = normalize_category_text(text)
+    words = re.findall(r"\b[a-z0-9]+\b", normalized_text)
+
+    words = [
+        word for word in words
+        if len(word) >= min_word_length and word not in stop_words
     ]
 
-    missing_col = f"{target_col}_is_missing"
+    word_counts = pd.Series(words).value_counts().head(top_n)
 
-    summary = (
-        exploded
-        .groupby("category")
-        .agg(
-            mention_count=("category", "size"),
-            row_count=("row_index", "nunique"),
-            missing_target_mention_count=(missing_col, "sum"),
-            missing_target_row_count=(missing_col, "sum"),
-        )
+    return (
+        word_counts
         .reset_index()
-        .sort_values("mention_count", ascending=False)
+        .rename(columns={"index": "word", "count": "count"})
+    )
+
+
+def count_interest_terms_in_text(df, text_cols, terms_map):
+    """
+    Counts selected words or phrases inside text columns.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing the text columns
+        text_cols (tuple[str] | list[str]): text columns to search in
+        terms_map (dict): output labels as keys and words/phrases to search as values
+
+    Returns:
+        pd.DataFrame: table with term, count, and row_count columns
+    """
+    text_source = pd.Series("", index=df.index)
+
+    for column in text_cols:
+        if column in df.columns:
+            text_source = text_source + " " + df[column].fillna("").astype(str)
+
+    normalized_text = text_source.apply(normalize_category_text)
+
+    rows = []
+
+    for term, variants in terms_map.items():
+        if isinstance(variants, str):
+            variants = [variants]
+
+        total_count = 0
+        matched_rows = pd.Series(False, index=df.index)
+
+        for variant in variants:
+            variant_norm = normalize_category_text(variant)
+            pattern = r"\b" + re.escape(variant_norm) + r"\b"
+
+            counts = normalized_text.str.count(pattern)
+            total_count += counts.sum()
+            matched_rows = matched_rows | counts.gt(0)
+
+        rows.append({
+            "term": term,
+            "count": int(total_count),
+            "row_count": int(matched_rows.sum()),
+        })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values(["row_count", "count"], ascending=False)
         .reset_index(drop=True)
     )
 
-    summary["missing_target_mention_%"] = (
-        summary["missing_target_mention_count"] / summary["mention_count"] * 100
-    ).round(2)
 
-    return summary, row_mentions
-
-
-def models_by_brand(df, brand, brand_col = "Marca", model_col = "Modelo"):
+def models_by_brand(df, brand, brand_col="Marca", model_col="Modelo"):
     """
     Returns the available models for a selected brand.
 
@@ -569,6 +656,7 @@ def models_by_brand(df, brand, brand_col = "Marca", model_col = "Modelo"):
 def print_missing_feature_text(df, feature_col, text_cols=("Título", "Descripción"), max_rows=None):
     """
     Prints text columns for rows where a selected feature is missing.
+    Useful for manual inspection when deciding how to impute a column.
 
     Arguments:
         df (pd.DataFrame): dataset containing the selected feature and text columns
@@ -579,12 +667,7 @@ def print_missing_feature_text(df, feature_col, text_cols=("Título", "Descripci
     Returns:
         None
     """
-    missing_mask = (
-        df[feature_col].isna()
-        | df[feature_col].astype(str).str.strip().str.lower().eq("missing")
-    )
-
-    missing_rows = df[missing_mask].copy()
+    missing_rows = df[_build_missing_mask(df[feature_col])].copy()
 
     if max_rows is not None:
         missing_rows = missing_rows.head(max_rows)
