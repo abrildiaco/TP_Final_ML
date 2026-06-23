@@ -1,5 +1,6 @@
 import unicodedata  # Library for normalizing text
 from difflib import SequenceMatcher  # Library for measuring string similarity
+import re # For regex operations in engine feature extraction
 
 import numpy as np
 import pandas as pd
@@ -200,26 +201,54 @@ def duplicate_rows_summary(df):
     })
 
 
-def missing_values_summary(df):
+def missing_values_summary(df, missing_values=("missing",)):
     """
     Returns the number and percentage of missing values per column.
 
     Arguments:
         df (pd.DataFrame): dataset to analyze
+        missing_values (tuple[str]): text values treated as missing
 
     Returns:
         pd.DataFrame: missing values summary
     """
-    summary = pd.DataFrame({
-        "column": df.columns,
-        "missing_count": df.isna().sum().values,
-        "missing_percentage": (df.isna().mean().values * 100).round(2),
-    })
+    normalized_missing_values = {
+        normalize_category_text(value)
+        for value in missing_values
+    }
 
-    summary = summary[summary["missing_count"] > 0]
+    rows = []
 
-    return summary.sort_values("missing_percentage", ascending=False)
+    for column in df.columns:
+        series = df[column]
 
+        missing_mask = series.isna()
+
+        if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
+            normalized_series = series.apply(
+                lambda value: (
+                    np.nan
+                    if pd.isna(value)
+                    else normalize_category_text(value)
+                )
+            )
+
+            missing_mask = missing_mask | normalized_series.isin(normalized_missing_values)
+
+        missing_count = missing_mask.sum()
+
+        if missing_count > 0:
+            rows.append({
+                "column": column,
+                "missing_count": missing_count,
+                "missing_percentage": round(missing_count / len(df) * 100, 2) if len(df) else np.nan,
+            })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("missing_percentage", ascending=False)
+        .reset_index(drop=True)
+    )
 
 def unique_values_summary(df):
     """
@@ -385,6 +414,119 @@ def invert_category_map(category_map):
 
 
 # ========================= Specific Inspection Helpers =========================
+def count_category_mentions_in_text(df, target_col, text_cols, category_map, ignored_categories=("missing", "otros")):
+    """
+    Counts semantic category mentions inside text columns and compares missing target rows.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing target and text columns
+        target_col (str): column used to identify missing rows
+        text_cols (tuple[str] | list[str]): text columns to search in
+        category_map (dict): dictionary with final values as keys and variants as values
+        ignored_categories (tuple[str]): mapped categories excluded from the count
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]: category summary and row-level mentions
+    """
+    inverted_map = invert_category_map(category_map)
+
+    variant_to_category = {}
+
+    for final_value, variants in category_map.items():
+        final_norm = normalize_category_text(final_value)
+
+        if final_norm in ignored_categories:
+            continue
+
+        variant_to_category[final_norm] = final_norm
+
+        for variant in variants:
+            variant_norm = normalize_category_text(variant)
+            variant_to_category[variant_norm] = final_norm
+
+    variants = sorted(
+        variant_to_category,
+        key=lambda value: len(value.split()),
+        reverse=True
+    )
+
+    rows = []
+
+    for row_index, row in df.iterrows():
+        text = " ".join(
+            str(row[col])
+            for col in text_cols
+            if col in df.columns and not pd.isna(row[col])
+        )
+
+        normalized_text = normalize_category_text(text)
+
+        mentions = []
+
+        for variant in variants:
+            pattern = r"\b" + re.escape(variant) + r"\b"
+            matches = re.findall(pattern, normalized_text)
+
+            for _ in matches:
+                mentions.append(variant_to_category[variant])
+
+        is_missing_target = (
+            pd.isna(row[target_col])
+            or normalize_category_text(row[target_col]) == "missing"
+        )
+
+        rows.append({
+            "row_index": row_index,
+            f"{target_col}_is_missing": is_missing_target,
+            "matched_categories": " | ".join(sorted(set(mentions))),
+            "n_category_mentions": len(mentions),
+        })
+
+    row_mentions = pd.DataFrame(rows)
+
+    if row_mentions.empty:
+        summary = pd.DataFrame(columns=[
+            "category",
+            "mention_count",
+            "row_count",
+            "missing_target_mention_count",
+            "missing_target_row_count",
+        ])
+        return summary, row_mentions
+
+    exploded = (
+        row_mentions
+        .assign(category=row_mentions["matched_categories"].str.split(" | "))
+        .explode("category")
+    )
+
+    exploded = exploded[
+        exploded["category"].notna()
+        & exploded["category"].ne("")
+    ]
+
+    missing_col = f"{target_col}_is_missing"
+
+    summary = (
+        exploded
+        .groupby("category")
+        .agg(
+            mention_count=("category", "size"),
+            row_count=("row_index", "nunique"),
+            missing_target_mention_count=(missing_col, "sum"),
+            missing_target_row_count=(missing_col, "sum"),
+        )
+        .reset_index()
+        .sort_values("mention_count", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    summary["missing_target_mention_%"] = (
+        summary["missing_target_mention_count"] / summary["mention_count"] * 100
+    ).round(2)
+
+    return summary, row_mentions
+
 
 def models_by_brand(df, brand, brand_col = "Marca", model_col = "Modelo"):
     """

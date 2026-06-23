@@ -211,7 +211,8 @@ def extract_engine_liters(value, require_engine_context=False, allow_start_numbe
     return np.nan
 
 
-def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", "Descripción", "Versión"), version_col="Versión", return_audit=True):
+def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", "Descripción", "Versión"), version_col="Versión", 
+                                  turbo_patterns=None, return_audit=True,):
     """
     Fills missing engine values using reliable engine patterns found in text columns.
 
@@ -220,6 +221,7 @@ def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", 
         engine_col (str): engine column name
         text_cols (tuple[str]): text columns used to search for engine information
         version_col (str): version column name
+        turbo_patterns (list[str] | None): regex patterns that indicate turbo
         return_audit (bool): whether to return a table with the filling process
 
     Returns:
@@ -227,7 +229,30 @@ def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", 
     """
     data = df.copy()
 
-    missing_mask = data[engine_col].isna()
+    if turbo_patterns is None:
+        turbo_patterns = [
+            r"\bturbo\b",
+            r"\btsi\b",
+            r"\btdi\b",
+            r"\btfsi\b",
+            r"\btce\b",
+            r"\bthp\b",
+            r"\becoboost\b",
+            r"\bt270\b",
+            r"\d\.\d\s*t\b",
+        ]
+
+    missing_mask = (
+        data[engine_col].isna()
+        | data[engine_col].apply(
+            lambda value: (
+                False
+                if pd.isna(value)
+                else normalize_category_text(value) == "missing"
+            )
+        )
+    )
+
     extracted_liters = pd.Series(np.nan, index=data.index)
 
     if version_col in data.columns:
@@ -242,7 +267,7 @@ def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", 
     text_source = pd.Series("", index=data.index)
 
     for column in text_cols:
-        if column in data.columns and column != version_col:
+        if column in data.columns:
             text_source = text_source + " " + data[column].fillna("").astype(str)
 
     extracted_from_text = text_source.apply(
@@ -255,14 +280,25 @@ def fill_missing_engine_from_text(df, engine_col="Motor", text_cols=("Título", 
 
     extracted_liters = extracted_liters.fillna(extracted_from_text)
 
+    extracted_has_turbo = text_source.apply(
+        lambda value: has_turbo(value, turbo_patterns)
+    )
+
     fill_mask = missing_mask & extracted_liters.notna()
 
-    # Keep extracted engine values numeric
-    data.loc[fill_mask, engine_col] = extracted_liters.loc[fill_mask].astype(str)
+    extracted_engine_text = extracted_liters.round(1).astype(str)
+    extracted_engine_text = extracted_engine_text.where(
+        extracted_has_turbo.eq(0),
+        extracted_engine_text + " turbo"
+    )
+
+    data.loc[fill_mask, engine_col] = extracted_engine_text.loc[fill_mask]
 
     audit_table = pd.DataFrame({
         "row_index": data.index,
         "extracted_liters": extracted_liters,
+        "extracted_has_turbo": extracted_has_turbo,
+        "extracted_engine_text": extracted_engine_text,
         "was_missing": missing_mask,
         "was_filled": fill_mask,
     })
@@ -326,6 +362,101 @@ def has_turbo(value, turbo_patterns):
 
     return int(bool(re.search(pattern, text)))
 
+# ========================= Fill Missing =========================
+def fill_missing_from_single_text_match(df, target_col, matches_df, matched_col="matched_categories", row_index_col="row_index", separator=" | ", missing_values=("missing",)):
+    """
+    Fills missing target values using row-level text matches with a single detected category.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing the target column
+        target_col (str): column with missing values to fill
+        matches_df (pd.DataFrame): row-level table containing matched categories
+        matched_col (str): column with matched categories separated by a separator
+        row_index_col (str): column containing original dataframe row indexes
+        separator (str): separator used between multiple matched categories
+        missing_values (tuple[str]): text values treated as missing
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]: transformed dataset and audit table
+    """
+    data = df.copy()
+    candidate_matches = matches_df.copy()
+
+    normalized_missing_values = {
+        normalize_category_text(value)
+        for value in missing_values
+    }
+
+    missing_mask = (
+        data[target_col].isna()
+        | data[target_col].apply(
+            lambda value: (
+                False
+                if pd.isna(value)
+                else normalize_category_text(value) in normalized_missing_values
+            )
+        )
+    )
+
+    candidate_matches[matched_col] = candidate_matches[matched_col].fillna("").astype(str)
+
+    candidate_matches["matched_list"] = candidate_matches[matched_col].apply(
+        lambda value: [
+            item.strip()
+            for item in value.split(separator)
+            if item.strip()
+        ]
+    )
+
+    candidate_matches["n_unique_matches"] = candidate_matches["matched_list"].apply(
+        lambda values: len(set(values))
+    )
+
+    candidate_matches["fill_value"] = candidate_matches["matched_list"].apply(
+        lambda values: values[0] if len(set(values)) == 1 else np.nan
+    )
+
+    candidate_matches = candidate_matches[
+        candidate_matches[row_index_col].isin(data.index)
+    ].copy()
+
+    candidate_matches["target_is_missing"] = candidate_matches[row_index_col].map(missing_mask)
+
+    fill_candidates = candidate_matches[
+        candidate_matches["target_is_missing"]
+        & candidate_matches["fill_value"].notna()
+    ].copy()
+
+    fill_values = fill_candidates.set_index(row_index_col)["fill_value"]
+
+    data.loc[fill_values.index, target_col] = fill_values
+
+    audit_table = fill_candidates[[
+        row_index_col,
+        matched_col,
+        "n_unique_matches",
+        "fill_value",
+    ]].copy()
+
+    audit_table["target_col"] = target_col
+
+    missing_after = (
+        data[target_col].isna()
+        | data[target_col].apply(
+            lambda value: (
+                False
+                if pd.isna(value)
+                else normalize_category_text(value) in normalized_missing_values
+            )
+        )
+    )
+
+    print(f"Missing rows in '{target_col}' before filling: {missing_mask.sum()}")
+    print(f"Rows filled from text matches: {len(fill_values)}")
+    print(f"Missing rows in '{target_col}' after filling: {missing_after.sum()}")
+
+    return data, audit_table
+
 
 # ========================= Encoding =========================
 
@@ -372,56 +503,5 @@ def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None)
 
     if train:
         return data, categories_map
-
-    return data
-
-
-# Prueba
-def fill_missing_from_text(df, target_col, text_cols, extractor, return_audit=True):
-    """
-    Fills missing values in a target column using information extracted from text columns.
-
-    Arguments:
-        df (pd.DataFrame): dataset containing the target and text columns
-        target_col (str): column with missing values to fill
-        text_cols (tuple[str] | list[str]): text columns used as information source
-        extractor (callable): function that receives text and returns an extracted value
-        return_audit (bool): whether to return a table with the filling process
-
-    Returns:
-        pd.DataFrame | tuple[pd.DataFrame, pd.DataFrame]: transformed dataset and optional audit table
-    """
-    data = df.copy()
-
-    missing_mask = data[target_col].isna()
-
-    text_source = pd.Series("", index=data.index)
-
-    # Combine all available text columns into one searchable text source
-    for column in text_cols:
-        if column in data.columns:
-            text_source = text_source + " " + data[column].fillna("").astype(str)
-
-    extracted_values = text_source.apply(extractor)
-
-    fill_mask = missing_mask & extracted_values.notna()
-
-    data.loc[fill_mask, target_col] = extracted_values.loc[fill_mask]
-
-    audit_table = pd.DataFrame({
-        "row_index": data.index,
-        "extracted_value": extracted_values,
-        "was_missing": missing_mask,
-        "was_filled": fill_mask,
-    })
-
-    audit_table = audit_table[audit_table["was_missing"]].reset_index(drop=True)
-
-    print(f"Missing rows in '{target_col}': {missing_mask.sum()}")
-    print(f"Filled from text: {fill_mask.sum()}")
-    print(f"Still missing after text search: {missing_mask.sum() - fill_mask.sum()}")
-
-    if return_audit:
-        return data, audit_table
 
     return data
