@@ -492,6 +492,425 @@ def plot_preliminary_outliers(data, numeric_cols=("Precio", "Año", "Kilómetros
     plt.show()
 
 
+def _iqr_bounds(values, iqr_multiplier=1.5):
+    """
+    Computes IQR lower and upper bounds for a numeric series.
+
+    Arguments:
+        values (pd.Series): numeric values
+        iqr_multiplier (float): multiplier applied to the IQR
+
+    Returns:
+        tuple[float, float, float]: lower bound, upper bound and IQR
+    """
+    q1 = values.quantile(0.25)
+    q3 = values.quantile(0.75)
+    iqr = q3 - q1
+
+    lower_bound = q1 - iqr_multiplier * iqr
+    upper_bound = q3 + iqr_multiplier * iqr
+
+    return lower_bound, upper_bound, iqr
+
+
+def _resolve_context_columns(data, value_col, group_col=None, context_cols=None):
+    """
+    Resolves which columns should be attached to an outlier audit table.
+
+    Arguments:
+        data (pd.DataFrame): dataset to inspect
+        value_col (str): numeric column used to detect outliers
+        group_col (str | None): optional group column
+        context_cols (list[str] | tuple[str] | str | None): extra columns to keep.
+            Use "all" to keep every available feature except value_col and group_col
+
+    Returns:
+        list[str]: context columns present in the dataset
+    """
+    excluded_cols = {value_col, group_col, None}
+
+    if context_cols == "all":
+        return [column for column in data.columns if column not in excluded_cols]
+
+    context_cols = context_cols or []
+
+    return [
+        column for column in context_cols
+        if column in data.columns and column not in excluded_cols
+    ]
+
+
+def detect_iqr_outliers(data, value_col, group_col=None, context_cols=None,
+                        iqr_multiplier=1.5, min_group_size=30,
+                        side="both"):
+    """
+    Detects outliers using the IQR rule and returns row-level context.
+
+    If group_col is provided, IQR bounds are computed within each group. This is
+    useful for variables such as price, where a value can be extreme globally
+    but reasonable inside a brand or model.
+
+    Arguments:
+        data (pd.DataFrame): dataset to inspect
+        value_col (str): numeric column used to detect outliers
+        group_col (str | None): optional group column for grouped IQR bounds
+        context_cols (list[str] | tuple[str] | str | None): additional columns
+            included in the returned outlier table. Use "all" to include every
+            available feature
+        iqr_multiplier (float): multiplier applied to the IQR
+        min_group_size (int): minimum group size required when group_col is used
+        side (str): one of "both", "high" or "low"
+
+    Returns:
+        pd.DataFrame: detected outliers with bounds and context columns
+    """
+    valid_sides = {"both", "high", "low"}
+
+    if side not in valid_sides:
+        raise ValueError(f"side must be one of {valid_sides}.")
+
+    context_cols = _resolve_context_columns(data, value_col, group_col, context_cols)
+    columns_to_keep = [value_col]
+
+    if group_col is not None:
+        columns_to_keep.append(group_col)
+
+    columns_to_keep.extend(context_cols)
+
+    plot_data = data[columns_to_keep].copy()
+    plot_data["row_index"] = data.index
+    plot_data[value_col] = pd.to_numeric(plot_data[value_col], errors="coerce")
+    plot_data = plot_data.dropna(subset=[value_col])
+
+    outlier_tables = []
+
+    if group_col is None:
+        lower_bound, upper_bound, iqr = _iqr_bounds(plot_data[value_col], iqr_multiplier)
+        group_bounds = [(None, plot_data, lower_bound, upper_bound, iqr)]
+    else:
+        group_bounds = []
+
+        for group_name, group_data in plot_data.groupby(group_col, dropna=False):
+            if len(group_data) < min_group_size:
+                continue
+
+            lower_bound, upper_bound, iqr = _iqr_bounds(group_data[value_col], iqr_multiplier)
+            group_bounds.append((group_name, group_data, lower_bound, upper_bound, iqr))
+
+    for group_name, group_data, lower_bound, upper_bound, iqr in group_bounds:
+        high_mask = group_data[value_col] > upper_bound
+        low_mask = group_data[value_col] < lower_bound
+
+        if side == "high":
+            outlier_mask = high_mask
+        elif side == "low":
+            outlier_mask = low_mask
+        else:
+            outlier_mask = high_mask | low_mask
+
+        outliers = group_data[outlier_mask].copy()
+
+        if outliers.empty:
+            continue
+
+        outliers["lower_bound"] = lower_bound
+        outliers["upper_bound"] = upper_bound
+        outliers["iqr"] = iqr
+        outliers["outlier_type"] = np.where(
+            outliers[value_col] > upper_bound,
+            "high",
+            "low",
+        )
+
+        # Score is scaled by IQR so outliers from different groups are comparable
+        denominator = iqr if iqr != 0 else 1
+        outliers["outlier_score"] = np.where(
+            outliers["outlier_type"] == "high",
+            (outliers[value_col] - upper_bound) / denominator,
+            (lower_bound - outliers[value_col]) / denominator,
+        )
+
+        outlier_tables.append(outliers)
+
+    if not outlier_tables:
+        output_cols = [
+            "row_index",
+            value_col,
+            "lower_bound",
+            "upper_bound",
+            "iqr",
+            "outlier_type",
+            "outlier_score",
+        ]
+
+        if group_col is not None:
+            output_cols.insert(2, group_col)
+
+        output_cols.extend([
+            column for column in context_cols
+            if column in data.columns and column not in output_cols
+        ])
+
+        return pd.DataFrame(columns=output_cols)
+
+    outlier_table = pd.concat(outlier_tables, axis=0)
+
+    output_cols = [
+        "row_index",
+        value_col,
+        "lower_bound",
+        "upper_bound",
+        "iqr",
+        "outlier_type",
+        "outlier_score",
+    ]
+
+    if group_col is not None:
+        output_cols.insert(2, group_col)
+
+    output_cols.extend([
+        column for column in context_cols
+        if column in outlier_table.columns and column not in output_cols
+    ])
+
+    return (
+        outlier_table[output_cols]
+        .sort_values("outlier_score", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+def plot_iqr_outliers(data, value_col, group_col=None, context_cols=None,
+                      iqr_multiplier=1.5, min_group_size=30, side="both",
+                      max_groups=20, top_n_labels=12, title=None):
+    """
+    Plots a numeric variable and highlights IQR outliers in red.
+
+    The function also returns a table with the detected outliers and selected
+    context columns, so each highlighted point can be inspected.
+
+    Arguments:
+        data (pd.DataFrame): dataset to inspect
+        value_col (str): numeric column used to detect outliers
+        group_col (str | None): optional group column for grouped outlier plots
+        context_cols (list[str] | None): additional columns returned for context
+        iqr_multiplier (float): multiplier applied to the IQR
+        min_group_size (int): minimum group size required when group_col is used
+        side (str): one of "both", "high" or "low"
+        max_groups (int): maximum number of groups shown when group_col is used
+        top_n_labels (int): number of strongest outliers annotated in the plot
+        title (str | None): plot title
+
+    Returns:
+        pd.DataFrame: detected outliers with context columns
+    """
+    outliers = detect_iqr_outliers(
+        data,
+        value_col=value_col,
+        group_col=group_col,
+        context_cols=context_cols,
+        iqr_multiplier=iqr_multiplier,
+        min_group_size=min_group_size,
+        side=side,
+    )
+
+    plot_cols = [value_col]
+
+    if group_col is not None:
+        plot_cols.append(group_col)
+
+    plot_data = data[plot_cols].copy()
+    plot_data["row_index"] = data.index
+    plot_data[value_col] = pd.to_numeric(plot_data[value_col], errors="coerce")
+    plot_data = plot_data.dropna(subset=[value_col])
+
+    if group_col is None:
+        plot_data["_x_position"] = 0
+        x_labels = [value_col]
+        figsize = (6, 5)
+    else:
+        if outliers.empty:
+            selected_groups = plot_data[group_col].value_counts().head(max_groups).index.tolist()
+        else:
+            selected_groups = outliers[group_col].value_counts().head(max_groups).index.tolist()
+
+        plot_data = plot_data[plot_data[group_col].isin(selected_groups)].copy()
+        x_positions = {group: index for index, group in enumerate(selected_groups)}
+        plot_data["_x_position"] = plot_data[group_col].map(x_positions)
+        x_labels = [str(group) for group in selected_groups]
+        figsize = (max(8, 0.55 * len(selected_groups)), 5.5)
+
+    outlier_indices = set(outliers["row_index"])
+    plot_data["is_outlier"] = plot_data["row_index"].isin(outlier_indices)
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    normal_data = plot_data[~plot_data["is_outlier"]]
+    outlier_plot_data = plot_data[plot_data["is_outlier"]]
+
+    rng = np.random.default_rng(42)
+
+    normal_x = normal_data["_x_position"] + rng.uniform(-0.08, 0.08, size=len(normal_data))
+    outlier_x = outlier_plot_data["_x_position"] + rng.uniform(-0.08, 0.08, size=len(outlier_plot_data))
+
+    ax.scatter(
+        normal_x,
+        normal_data[value_col],
+        color=FORMAL_COLORS["gray"],
+        alpha=0.25,
+        s=18,
+        label="Normal rows",
+    )
+
+    ax.scatter(
+        outlier_x,
+        outlier_plot_data[value_col],
+        color=FORMAL_COLORS["red"],
+        edgecolor="black",
+        linewidth=0.4,
+        alpha=0.95,
+        s=42,
+        label="Outliers",
+    )
+
+    label_rows = outliers.head(top_n_labels)
+
+    for row in label_rows.itertuples():
+        match = outlier_plot_data[outlier_plot_data["row_index"] == row.row_index]
+
+        if match.empty:
+            continue
+
+        x_value = match["_x_position"].iloc[0]
+        y_value = match[value_col].iloc[0]
+
+        ax.annotate(
+            str(row.row_index),
+            xy=(x_value, y_value),
+            xytext=(4, 4),
+            textcoords="offset points",
+            fontsize=8,
+            color=FORMAL_COLORS["red"],
+        )
+
+    ax.set_xticks(range(len(x_labels)))
+    ax.set_xticklabels(x_labels, rotation=45, ha="right")
+    ax.set_ylabel(value_col)
+    ax.set_title(title or f"Outliers de {value_col}", fontsize=14, fontweight="bold")
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    return outliers
+
+
+def plot_iqr_outlier_scatter(data, x_col, y_col, outlier_col=None,
+                             context_cols=None, group_col=None,
+                             iqr_multiplier=1.5, min_group_size=30,
+                             side="both", top_n_labels=12,
+                             sample_size=None, title=None):
+    """
+    Plots a scatter plot and highlights IQR outliers in red.
+
+    Outliers are detected using outlier_col. For example, x_col can be
+    Kilómetros, y_col can be Precio, and outlier_col can be Precio.
+
+    Arguments:
+        data (pd.DataFrame): dataset to inspect
+        x_col (str): x-axis numeric column
+        y_col (str): y-axis numeric column
+        outlier_col (str | None): column used to detect outliers. If None, y_col
+            is used
+        context_cols (list[str] | None): additional columns returned for context
+        group_col (str | None): optional group column for grouped IQR bounds
+        iqr_multiplier (float): multiplier applied to the IQR
+        min_group_size (int): minimum group size required when group_col is used
+        side (str): one of "both", "high" or "low"
+        top_n_labels (int): number of strongest outliers annotated in the plot
+        sample_size (int | None): optional sample size for normal rows
+        title (str | None): plot title
+
+    Returns:
+        pd.DataFrame: detected outliers with context columns
+    """
+    outlier_col = outlier_col or y_col
+
+    outliers = detect_iqr_outliers(
+        data,
+        value_col=outlier_col,
+        group_col=group_col,
+        context_cols=context_cols,
+        iqr_multiplier=iqr_multiplier,
+        min_group_size=min_group_size,
+        side=side,
+    )
+
+    plot_data = data[[x_col, y_col]].copy()
+    plot_data["row_index"] = data.index
+    plot_data[x_col] = pd.to_numeric(plot_data[x_col], errors="coerce")
+    plot_data[y_col] = pd.to_numeric(plot_data[y_col], errors="coerce")
+    plot_data = plot_data.dropna(subset=[x_col, y_col])
+    plot_data["is_outlier"] = plot_data["row_index"].isin(set(outliers["row_index"]))
+
+    normal_data = plot_data[~plot_data["is_outlier"]]
+    outlier_plot_data = plot_data[plot_data["is_outlier"]]
+
+    if sample_size is not None and len(normal_data) > sample_size:
+        normal_data = normal_data.sample(sample_size, random_state=42)
+
+    fig, ax = plt.subplots(figsize=(8.5, 5.5))
+
+    ax.scatter(
+        normal_data[x_col],
+        normal_data[y_col],
+        color=FORMAL_COLORS["gray"],
+        alpha=0.25,
+        s=18,
+        label="Normal rows",
+    )
+
+    ax.scatter(
+        outlier_plot_data[x_col],
+        outlier_plot_data[y_col],
+        color=FORMAL_COLORS["red"],
+        edgecolor="black",
+        linewidth=0.4,
+        alpha=0.95,
+        s=45,
+        label="Outliers",
+    )
+
+    label_rows = outliers.head(top_n_labels)
+
+    for row in label_rows.itertuples():
+        match = outlier_plot_data[outlier_plot_data["row_index"] == row.row_index]
+
+        if match.empty:
+            continue
+
+        ax.annotate(
+            str(row.row_index),
+            xy=(match[x_col].iloc[0], match[y_col].iloc[0]),
+            xytext=(4, 4),
+            textcoords="offset points",
+            fontsize=8,
+            color=FORMAL_COLORS["red"],
+        )
+
+    ax.set_title(title or f"{y_col} vs {x_col} con outliers resaltados", fontsize=14, fontweight="bold")
+    ax.set_xlabel(x_col)
+    ax.set_ylabel(y_col)
+    ax.grid(alpha=0.25)
+    ax.legend()
+
+    plt.tight_layout()
+    plt.show()
+
+    return outliers
+
+
 # ========================= Missingness Analysis =========================
 
 
@@ -933,18 +1352,203 @@ def plot_category_frequency_after_cleaning(data, columns, top_n=15, n_cols=2):
     plot_compact_value_counts(data, columns=columns, top_n=top_n, n_cols=n_cols)
 
 
-def plot_numeric_correlation_heatmap(data, numeric_cols=("Precio", "log_Precio", "Año", "Kilómetros", "Puertas"),
+def build_plot_dataset(features, target, target_col="Precio"):
+    """
+    Adds the target column to a feature dataframe for EDA plots.
+
+    Arguments:
+        features (pd.DataFrame): feature dataset
+        target (pd.Series | np.ndarray | list): target values
+        target_col (str): name assigned to the target column
+
+    Returns:
+        pd.DataFrame: copy of features with the target column added
+    """
+    plot_data = features.copy()
+
+    if isinstance(target, pd.Series):
+        plot_data[target_col] = target.reindex(plot_data.index).values
+    else:
+        plot_data[target_col] = target
+
+    return plot_data
+
+
+def get_feature_columns(data, feature_type="numeric", target_col="Precio",
+                        include_target=False, include_log_target=False,
+                        exclude_cols=None):
+    """
+    Selects numeric, binary or both types of columns from a dataset.
+
+    Arguments:
+        data (pd.DataFrame): dataset to inspect
+        feature_type (str): one of "numeric", "binary" or "both"
+        target_col (str | None): target column name
+        include_target (bool): whether to include the target column first
+        include_log_target (bool): whether to include log target if it exists
+        exclude_cols (list[str] | None): columns to ignore
+
+    Returns:
+        list[str]: selected column names
+    """
+    valid_feature_types = {"numeric", "binary", "both"}
+
+    if feature_type not in valid_feature_types:
+        raise ValueError(f"feature_type must be one of {valid_feature_types}.")
+
+    exclude_cols = set(exclude_cols or [])
+
+    if target_col is not None:
+        exclude_cols.add(target_col)
+        exclude_cols.add(f"log_{target_col}")
+
+    numeric_candidates = [
+        column for column in data.select_dtypes(include="number").columns
+        if column not in exclude_cols
+    ]
+
+    binary_cols = []
+
+    for column in numeric_candidates:
+        values = data[column].dropna().unique()
+
+        if len(values) > 0 and set(values).issubset({0, 1, 0.0, 1.0}):
+            binary_cols.append(column)
+
+    numeric_cols = [
+        column for column in numeric_candidates
+        if column not in binary_cols
+    ]
+
+    if feature_type == "numeric":
+        selected_cols = numeric_cols
+    elif feature_type == "binary":
+        selected_cols = binary_cols
+    else:
+        selected_cols = numeric_cols + binary_cols
+
+    output_cols = []
+
+    if include_target and target_col in data.columns:
+        output_cols.append(target_col)
+
+    log_target_col = f"log_{target_col}"
+
+    if include_log_target and log_target_col in data.columns:
+        output_cols.append(log_target_col)
+
+    output_cols.extend(selected_cols)
+
+    return list(dict.fromkeys(output_cols))
+
+
+def get_non_one_hot_binary_columns(data, target_col="Precio", one_hot_prefixes=None,
+                                   exclude_cols=None):
+    """
+    Selects binary columns that are not one-hot encoded categorical columns.
+
+    Arguments:
+        data (pd.DataFrame): dataset to inspect
+        target_col (str | None): target column name
+        one_hot_prefixes (list[str] | None): prefixes used by one-hot columns.
+            If None, common project prefixes are used
+        exclude_cols (list[str] | None): additional columns to ignore
+
+    Returns:
+        list[str]: binary columns that do not start with one-hot prefixes
+    """
+    if one_hot_prefixes is None:
+        one_hot_prefixes = [
+            "Marca_",
+            "Modelo_",
+            "Color_",
+            "Transmisión_",
+            "Tipo de combustible_",
+            "Tipo de vendedor_",
+        ]
+
+    binary_cols = get_feature_columns(
+        data,
+        feature_type="binary",
+        target_col=target_col,
+        exclude_cols=exclude_cols,
+    )
+
+    return [
+        column for column in binary_cols
+        if not any(column.startswith(prefix) for prefix in one_hot_prefixes)
+    ]
+
+
+def plot_numeric_and_binary_correlation_heatmap(data, target_col="Precio",
+                                                one_hot_prefixes=None,
+                                                include_log_target=True,
+                                                title="Correlación de variables numéricas y binarias no one-hot"):
+    """
+    Plots a compact heatmap with numeric columns and non-one-hot binary columns.
+
+    This is useful after one-hot encoding when we want to keep engineered binary
+    signals, such as turbo or backup camera, but avoid hundreds of dummy columns.
+
+    Arguments:
+        data (pd.DataFrame): dataset including the target column
+        target_col (str): target column name
+        one_hot_prefixes (list[str] | None): prefixes used by one-hot columns
+        include_log_target (bool): whether to include log target in the heatmap
+        title (str): plot title
+
+    Returns:
+        None
+    """
+    numeric_cols = get_feature_columns(
+        data,
+        feature_type="numeric",
+        target_col=target_col,
+        include_target=True,
+        include_log_target=include_log_target,
+    )
+
+    binary_cols = get_non_one_hot_binary_columns(
+        data,
+        target_col=target_col,
+        one_hot_prefixes=one_hot_prefixes,
+    )
+
+    selected_cols = list(dict.fromkeys(numeric_cols + binary_cols))
+
+    plot_numeric_correlation_heatmap(
+        data,
+        numeric_cols=selected_cols,
+        price_col=target_col,
+        add_log_price=include_log_target,
+        include_target=False,
+        include_log_target=False,
+        title=title,
+    )
+
+
+def plot_numeric_correlation_heatmap(data, numeric_cols=None, feature_type="numeric",
                                      price_col="Precio", add_log_price=True,
-                                     title="Correlación entre variables numéricas"):
+                                     include_target=True, include_log_target=True,
+                                     title="Correlación entre variables numéricas",
+                                     figsize=None, cell_size=0.6, annotate=None):
     """
     Plots a correlation heatmap for numeric variables.
 
     Arguments:
         data (pd.DataFrame): preprocessed dataset
-        numeric_cols (tuple | list): numeric columns to include
+        numeric_cols (tuple | list | None): columns to include. If None, columns
+            are selected automatically using feature_type
+        feature_type (str): one of "numeric", "binary" or "both"
         price_col (str): price column used to create log price if requested
         add_log_price (bool): whether to create log_Precio temporarily
+        include_target (bool): whether to include price in the heatmap
+        include_log_target (bool): whether to include log price in the heatmap
         title (str): plot title
+        figsize (tuple[float, float] | None): custom figure size
+        cell_size (float): size multiplier used when figsize is computed
+        annotate (bool | None): whether to write correlation values in cells.
+            If None, annotation is used only for small heatmaps
 
     Returns:
         None
@@ -955,28 +1559,54 @@ def plot_numeric_correlation_heatmap(data, numeric_cols=("Precio", "log_Precio",
         prices = pd.to_numeric(plot_data[price_col], errors="coerce")
         plot_data["log_Precio"] = np.where(prices > 0, np.log1p(prices), np.nan)
 
+    if numeric_cols is None:
+        numeric_cols = get_feature_columns(
+            plot_data,
+            feature_type=feature_type,
+            target_col=price_col,
+            include_target=include_target,
+            include_log_target=include_log_target,
+        )
+
     corr_data = _numeric_plot_data(plot_data, numeric_cols).dropna(axis=1, how="all")
     corr = corr_data.corr()
 
-    fig, ax = plt.subplots(figsize=(8, 6))
+    if corr.empty:
+        raise ValueError("No numeric columns available for the correlation heatmap.")
+
+    n_features = len(corr.columns)
+
+    if figsize is None:
+        figsize = (
+            max(8, n_features * cell_size + 2),
+            max(6, n_features * cell_size + 1.5),
+        )
+
+    if annotate is None:
+        annotate = n_features <= 18
+
+    label_fontsize = 9 if n_features <= 18 else 7 if n_features <= 40 else 5
+
+    fig, ax = plt.subplots(figsize=figsize)
     image = ax.imshow(corr, cmap="coolwarm", vmin=-1, vmax=1)
 
     ax.set_xticks(range(len(corr.columns)))
     ax.set_yticks(range(len(corr.index)))
-    ax.set_xticklabels(corr.columns, rotation=45, ha="right")
-    ax.set_yticklabels(corr.index)
+    ax.set_xticklabels(corr.columns, rotation=45, ha="right", fontsize=label_fontsize)
+    ax.set_yticklabels(corr.index, fontsize=label_fontsize)
 
-    # Write correlation values inside each cell
-    for row in range(len(corr.index)):
-        for col in range(len(corr.columns)):
-            ax.text(
-                col,
-                row,
-                f"{corr.iloc[row, col]:.2f}",
-                ha="center",
-                va="center",
-                fontsize=9,
-            )
+    if annotate:
+        # Write correlation values only when the heatmap is small enough to read
+        for row in range(len(corr.index)):
+            for col in range(len(corr.columns)):
+                ax.text(
+                    col,
+                    row,
+                    f"{corr.iloc[row, col]:.2f}",
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                )
 
     colorbar = fig.colorbar(image, ax=ax)
     colorbar.set_label("Correlación")
@@ -985,6 +1615,316 @@ def plot_numeric_correlation_heatmap(data, numeric_cols=("Precio", "log_Precio",
 
     plt.tight_layout()
     plt.show()
+
+
+def _binary_feature_columns(data, exclude_cols=None):
+    """
+    Finds binary numeric columns in a dataset.
+
+    Arguments:
+        data (pd.DataFrame): dataset to inspect
+        exclude_cols (list[str] | None): columns to ignore
+
+    Returns:
+        list[str]: columns that only contain 0/1 values after dropping missing values
+    """
+    return get_feature_columns(
+        data,
+        feature_type="binary",
+        target_col=None,
+        exclude_cols=exclude_cols,
+    )
+
+
+def _feature_group_name(column):
+    """
+    Gets a readable group name from an encoded feature name.
+
+    Arguments:
+        column (str): feature name
+
+    Returns:
+        str: group name before the first underscore, or Binary features
+    """
+    if "_" in column:
+        return column.split("_", 1)[0]
+
+    return "Binary features"
+
+
+def encoded_feature_target_correlation_table(data, target_col="Precio", feature_cols=None,
+                                             feature_type="binary", use_log_target=True,
+                                             min_frequency=None, max_frequency=None):
+    """
+    Builds a table with feature frequency and correlation against the target.
+
+    This is safer than plotting a full correlation matrix after one-hot encoding,
+    because it compares each encoded feature directly with the target instead of
+    comparing every feature against every other feature.
+
+    Arguments:
+        data (pd.DataFrame): encoded dataset including the target column
+        target_col (str): target column name
+        feature_cols (list[str] | None): features to analyze. If None, columns
+            are selected automatically using feature_type
+        feature_type (str): one of "numeric", "binary" or "both"
+        use_log_target (bool): whether to correlate features with log1p(target)
+        min_frequency (float | None): minimum feature mean required
+        max_frequency (float | None): maximum feature mean allowed
+
+    Returns:
+        pd.DataFrame: feature-level correlation summary
+    """
+    plot_data = data.copy()
+    target = pd.to_numeric(plot_data[target_col], errors="coerce")
+
+    if use_log_target:
+        target = np.where(target > 0, np.log1p(target), np.nan)
+
+    if feature_cols is None:
+        feature_cols = get_feature_columns(
+            plot_data,
+            feature_type=feature_type,
+            target_col=target_col,
+        )
+
+    binary_cols = set(get_feature_columns(
+        plot_data,
+        feature_type="binary",
+        target_col=target_col,
+    ))
+
+    rows = []
+
+    for feature in feature_cols:
+        values = pd.to_numeric(plot_data[feature], errors="coerce")
+        is_binary = feature in binary_cols
+        frequency = values.mean() if is_binary else np.nan
+
+        if is_binary and min_frequency is not None and frequency < min_frequency:
+            continue
+
+        if is_binary and max_frequency is not None and frequency > max_frequency:
+            continue
+
+        valid_mask = values.notna() & pd.notna(target)
+
+        if valid_mask.sum() < 2 or values.loc[valid_mask].nunique() < 2:
+            correlation = np.nan
+        else:
+            correlation = np.corrcoef(values.loc[valid_mask], target[valid_mask])[0, 1]
+
+        rows.append({
+            "feature": feature,
+            "group": _feature_group_name(feature),
+            "feature_type": "binary" if is_binary else "numeric",
+            "frequency": frequency,
+            "target_correlation": correlation,
+            "abs_target_correlation": abs(correlation) if pd.notna(correlation) else np.nan,
+        })
+
+    return (
+        pd.DataFrame(rows)
+        .dropna(subset=["target_correlation"])
+        .sort_values("abs_target_correlation", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+def plot_encoded_feature_correlation_heatmaps(data, target_col="Precio", feature_cols=None,
+                                              feature_type="binary",
+                                              groups=None, top_n_per_group=20,
+                                              min_frequency=0.01, max_frequency=0.99,
+                                              use_log_target=True, n_cols=2):
+    """
+    Plots grouped heatmaps of encoded binary feature correlation with the target.
+
+    Each heatmap shows only one group of encoded features, such as Marca, Modelo
+    or Color. This avoids building a huge feature-by-feature matrix after one-hot
+    encoding.
+
+    Arguments:
+        data (pd.DataFrame): encoded dataset including the target column
+        target_col (str): target column name
+        feature_cols (list[str] | None): features to analyze. If None, columns
+            are selected automatically using feature_type
+        feature_type (str): one of "numeric", "binary" or "both"
+        groups (list[str] | None): encoded groups to plot, such as ["Marca",
+            "Modelo", "Color"]. If None, the most common groups are used
+        top_n_per_group (int): maximum number of features shown per group
+        min_frequency (float): minimum feature frequency shown
+        max_frequency (float): maximum feature frequency shown
+        use_log_target (bool): whether to correlate features with log1p(target)
+        n_cols (int): number of subplot columns
+
+    Returns:
+        pd.DataFrame: correlation table used for the plots
+    """
+    correlation_table = encoded_feature_target_correlation_table(
+        data,
+        target_col=target_col,
+        feature_cols=feature_cols,
+        feature_type=feature_type,
+        use_log_target=use_log_target,
+        min_frequency=min_frequency,
+        max_frequency=max_frequency,
+    )
+
+    if correlation_table.empty:
+        raise ValueError("No encoded binary features available after applying the filters.")
+
+    if groups is None:
+        groups = correlation_table["group"].value_counts().head(6).index.tolist()
+
+    groups = [group for group in groups if group in correlation_table["group"].unique()]
+
+    if not groups:
+        raise ValueError("No feature groups available to plot.")
+
+    n_plots = len(groups)
+    n_rows = math.ceil(n_plots / n_cols)
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(7 * n_cols, 0.45 * top_n_per_group * n_rows + 2),
+    )
+
+    axes = np.asarray(axes).reshape(-1)
+    target_label = f"log({target_col})" if use_log_target else target_col
+
+    for ax, group in zip(axes, groups):
+        group_data = (
+            correlation_table[correlation_table["group"] == group]
+            .head(top_n_per_group)
+            .sort_values("target_correlation")
+        )
+
+        heatmap_values = group_data[["target_correlation"]].values
+
+        image = ax.imshow(heatmap_values, cmap="coolwarm", vmin=-1, vmax=1, aspect="auto")
+
+        labels = []
+
+        for row in group_data.itertuples():
+            if pd.notna(row.frequency):
+                labels.append(f"{row.feature}\n(freq={row.frequency:.2f})")
+            else:
+                labels.append(row.feature)
+
+        ax.set_yticks(range(len(group_data)))
+        ax.set_yticklabels(labels, fontsize=8)
+        ax.set_xticks([0])
+        ax.set_xticklabels([target_label], fontsize=9)
+        ax.set_title(group, fontsize=12, fontweight="bold")
+
+        for row_index, value in enumerate(group_data["target_correlation"]):
+            ax.text(
+                0,
+                row_index,
+                f"{value:.2f}",
+                ha="center",
+                va="center",
+                fontsize=8,
+                color="black",
+            )
+
+    for ax in axes[n_plots:]:
+        ax.axis("off")
+
+    colorbar = fig.colorbar(image, ax=axes[:n_plots], shrink=0.85)
+    colorbar.set_label("Correlación con target")
+
+    fig.suptitle("Correlación de features encoded con el target", fontsize=15, fontweight="bold")
+    plt.tight_layout()
+    plt.show()
+
+    return correlation_table
+
+
+def plot_top_target_correlations(data, target_col="Precio", feature_cols=None,
+                                 feature_type="both", top_n=25, use_log_target=True,
+                                 exclude_binary=False, title=None):
+    """
+    Plots the strongest feature correlations with the target as a bar chart.
+
+    This is useful after one-hot encoding to summarize the strongest signals
+    without plotting a huge correlation matrix.
+
+    Arguments:
+        data (pd.DataFrame): dataset including the target column
+        target_col (str): target column name
+        feature_cols (list[str] | None): features to analyze. If None, columns
+            are selected automatically using feature_type
+        feature_type (str): one of "numeric", "binary" or "both"
+        top_n (int): number of strongest positive and negative correlations shown
+        use_log_target (bool): whether to correlate features with log1p(target)
+        exclude_binary (bool): backward-compatible way to force numeric-only
+            features when feature_cols is None
+        title (str | None): plot title
+
+    Returns:
+        pd.DataFrame: sorted correlation table used for the plot
+    """
+    plot_data = data.copy()
+    target = pd.to_numeric(plot_data[target_col], errors="coerce")
+
+    if use_log_target:
+        target = np.where(target > 0, np.log1p(target), np.nan)
+
+    if feature_cols is None:
+        selected_feature_type = "numeric" if exclude_binary else feature_type
+        feature_cols = get_feature_columns(
+            plot_data,
+            feature_type=selected_feature_type,
+            target_col=target_col,
+        )
+    elif exclude_binary:
+        binary_cols = set(_binary_feature_columns(plot_data, exclude_cols=[target_col]))
+        feature_cols = [column for column in feature_cols if column not in binary_cols]
+
+    rows = []
+
+    for feature in feature_cols:
+        values = pd.to_numeric(plot_data[feature], errors="coerce")
+        valid_mask = values.notna() & pd.notna(target)
+
+        if valid_mask.sum() < 2 or values.loc[valid_mask].nunique() < 2:
+            continue
+
+        correlation = np.corrcoef(values.loc[valid_mask], target[valid_mask])[0, 1]
+
+        rows.append({
+            "feature": feature,
+            "target_correlation": correlation,
+            "abs_target_correlation": abs(correlation),
+        })
+
+    correlation_table = (
+        pd.DataFrame(rows)
+        .sort_values("abs_target_correlation", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    plot_data = correlation_table.head(top_n).sort_values("target_correlation")
+
+    fig, ax = plt.subplots(figsize=(9, max(4, 0.35 * len(plot_data))))
+    colors = [
+        FORMAL_COLORS["red"] if value < 0 else FORMAL_COLORS["teal"]
+        for value in plot_data["target_correlation"]
+    ]
+
+    ax.barh(plot_data["feature"], plot_data["target_correlation"], color=colors, alpha=0.9)
+    ax.axvline(0, color="black", linewidth=1)
+    ax.set_title(title or "Features más correlacionadas con el target", fontsize=14, fontweight="bold")
+    ax.set_xlabel("Correlación")
+    ax.set_ylabel("Feature")
+    ax.grid(axis="x", alpha=0.25)
+
+    plt.tight_layout()
+    plt.show()
+
+    return correlation_table
 
 
 def plot_median_price_heatmap(data, row_col="Marca", col_col="Año", price_col="Precio",
@@ -1047,12 +1987,12 @@ def plot_median_price_heatmap(data, row_col="Marca", col_col="Año", price_col="
 def plot_median_price_by_age_lines(data, group_col, age_col="Año", price_col="Precio",
                                    top_n=8, min_count=80, title=None):
     """
-    Plots median price by age for frequent groups.
+    Plots median price by a time variable for frequent groups.
 
     Arguments:
         data (pd.DataFrame): preprocessed dataset
         group_col (str): grouping column, such as brand or model
-        age_col (str): vehicle age column
+        age_col (str): vehicle age or year column
         price_col (str): price column name
         top_n (int): maximum number of frequent groups to plot
         min_count (int): minimum number of rows required per group
@@ -1103,6 +2043,34 @@ def plot_median_price_by_age_lines(data, group_col, age_col="Año", price_col="P
 
     plt.tight_layout()
     plt.show()
+
+
+def plot_median_price_by_year_lines(data, group_col, year_col="Año", price_col="Precio",
+                                    top_n=8, min_count=80, title=None):
+    """
+    Plots median price by vehicle year for frequent groups.
+
+    Arguments:
+        data (pd.DataFrame): preprocessed dataset
+        group_col (str): grouping column, such as brand or model
+        year_col (str): vehicle year column
+        price_col (str): price column name
+        top_n (int): maximum number of frequent groups to plot
+        min_count (int): minimum number of rows required per group
+        title (str | None): plot title
+
+    Returns:
+        None
+    """
+    plot_median_price_by_age_lines(
+        data=data,
+        group_col=group_col,
+        age_col=year_col,
+        price_col=price_col,
+        top_n=top_n,
+        min_count=min_count,
+        title=title,
+    )
 
 
 def plot_iqr_ranking_by_category(data, category_col="Marca", price_col="Precio",
