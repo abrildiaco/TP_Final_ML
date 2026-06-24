@@ -12,8 +12,7 @@ def _build_missing_mask(series, extra_missing=("missing",)):
     """
     Returns a boolean mask that is True wherever a Series value should be
     considered missing — either a real NaN or a placeholder string like
-    "missing". Centralizing this logic means the definition of "missing"
-    only needs to change in one place.
+    "missing".
 
     Arguments:
         series (pd.Series): column to evaluate
@@ -23,8 +22,14 @@ def _build_missing_mask(series, extra_missing=("missing",)):
     Returns:
         pd.Series[bool]: True where the value is considered missing
     """
-    normalized = {v.strip().lower() for v in extra_missing}
-    return series.isna() | series.astype(str).str.strip().str.lower().isin(normalized)
+    nan_mask = series.isna()
+    normalized = {v.strip().lower() for v in extra_missing} | {"nan"}
+
+    # Use .where(~nan_mask) to avoid converting real NaN to the string "nan"
+    # before the string comparison — otherwise isna() would miss them
+    string_mask = series.where(~nan_mask).astype(str).str.strip().str.lower().isin(normalized)
+
+    return nan_mask | string_mask
 
 
 def _concat_text_columns(df, text_cols):
@@ -239,6 +244,92 @@ def remove_invalid_values(df, range_rules, copy=True):
 
     return data
 
+def detect_outliers(df, rules, mode="flag", flag_col="is_outlier"):
+    """
+    Detects outliers in numeric columns using fixed bounds or IQR-based bounds.
+    Flag columns are added at the beginning of the dataframe for easy inspection.
+
+    Arguments:
+        df (pd.DataFrame): dataset to analyze
+        rules (dict): column names mapped to rule dicts with the following keys:
+            - method (str): "fixed" or "iqr"
+            - min, max (float): bounds when method is "fixed"
+            - multiplier (float): IQR multiplier k, defaults to 1.5
+            - allow_zero (bool): if True, zeros are never flagged and excluded
+              from the IQR calculation, defaults to False
+        mode (str): "flag" adds boolean outlier columns; "drop" removes outlier rows
+        flag_col (str): base name for the flag columns added when mode is "flag"
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]: transformed dataset and per-column summary
+    """
+    if mode not in ("flag", "drop"):
+        raise ValueError(f"mode must be 'flag' or 'drop', got '{mode}'.")
+
+    data = df.copy()
+    outlier_mask = pd.Series(False, index=data.index)
+    individual_masks = {}
+    summary_rows = []
+
+    for column, rule in rules.items():
+        if column not in data.columns:
+            print(f"Warning: column '{column}' not found in dataframe, skipping.")
+            continue
+
+        values = pd.to_numeric(data[column], errors="coerce")
+        method = rule.get("method")
+        allow_zero = rule.get("allow_zero", False)
+
+        if method == "fixed":
+            lower = rule["min"]
+            upper = rule["max"]
+
+        elif method == "iqr":
+            k = rule.get("multiplier", 1.5)
+            reference_values = values[values != 0] if allow_zero else values
+            q1 = reference_values.quantile(0.25)
+            q3 = reference_values.quantile(0.75)
+            iqr = q3 - q1
+            lower = q1 - k * iqr
+            upper = q3 + k * iqr
+
+        else:
+            raise ValueError(
+                f"Unknown method '{method}' for column '{column}'. "
+                "Use 'fixed' or 'iqr'."
+            )
+
+        column_outlier_mask = values.isna() | (values < lower) | (values > upper)
+
+        if allow_zero:
+            column_outlier_mask = column_outlier_mask & (values != 0)
+
+        # Collect individual masks to prepend them all at once after the loop
+        individual_masks[f"{flag_col}_{column}"] = column_outlier_mask
+        outlier_mask = outlier_mask | column_outlier_mask
+
+        summary_rows.append({
+            "column": column,
+            "method": method,
+            "allow_zero": allow_zero,
+            "lower_bound": round(lower, 4),
+            "upper_bound": round(upper, 4),
+            "outliers_found": int(column_outlier_mask.sum()),
+            "outlier_%": round(column_outlier_mask.mean() * 100, 2),
+        })
+
+    summary = pd.DataFrame(summary_rows)
+
+    print(f"Total rows flagged as outliers (any column): {outlier_mask.sum()} "
+          f"({round(outlier_mask.mean() * 100, 2)}%)")
+    print(summary.to_string(index=False))
+
+    if mode == "flag":
+        # Build flag columns first, then append the original columns after
+        flag_df = pd.DataFrame({flag_col: outlier_mask, **individual_masks})
+        return pd.concat([flag_df, data], axis=1)
+
+    return data[~outlier_mask].reset_index(drop=True)
 
 # =========================  Price Transformation  =========================
 

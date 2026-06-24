@@ -8,6 +8,24 @@ import pandas as pd
 
 # =========================  Private Helpers  =========================
 
+def display_table(df):
+    """
+    Displays a DataFrame in notebooks without showing the default pandas index.
+
+    Arguments:
+        df (pd.DataFrame): table to display
+
+    Returns:
+        None
+    """
+    try:
+        from IPython.display import display
+
+        display(df.style.hide(axis="index"))
+    except ImportError:
+        print(df.to_string(index=False))
+
+
 def _build_missing_mask(series, extra_missing=("missing",)):
     """
     Returns a boolean mask that is True wherever a Series value should be
