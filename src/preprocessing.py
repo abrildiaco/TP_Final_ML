@@ -441,26 +441,35 @@ def map_column_values(df, column, value_map):
 
 # =========================  Imputation of Values  =========================
 
-def impute_selected_rows(df, rows_to_impute, values_to_impute):
+def impute_missing_by_year(df, impute_col, year_threshold, year_col="Año", fill_value=0):
     """
-    Manually assigns specific values to selected rows. Useful for one-off
-    corrections identified during exploratory analysis.
+    Fills missing values in a column with a default value for rows where the
+    car is older than a given year threshold. Useful for any feature that did
+    not exist before a certain year — if the car predates the threshold and the
+    value is missing, it is safe to assume the feature is absent.
 
     Arguments:
         df (pd.DataFrame): dataset to transform
-        rows_to_impute (list): row index labels to update
-        values_to_impute (dict): column names mapped to the value to assign
+        impute_col (str): column with missing values to fill
+        year_threshold (int): cars strictly older than this year get filled
+        year_col (str): column containing the car's year, defaults to "Año"
+        fill_value (int | float | str): value to assign, defaults to 0
 
     Returns:
-        pd.DataFrame: dataset with the selected rows updated
+        pd.DataFrame: dataset with old cars filled in impute_col
+
     """
     data = df.copy()
 
-    for column, value in values_to_impute.items():
-        data.loc[rows_to_impute, column] = value
+    missing_mask = _build_missing_mask(data[impute_col])
+    old_car_mask = pd.to_numeric(data[year_col], errors="coerce") < year_threshold
+
+    data.loc[missing_mask & old_car_mask, impute_col] = fill_value
+
+    print(f"Filled {(missing_mask & old_car_mask).sum()} rows in '{impute_col}' "
+          f"with {fill_value} (older than {year_threshold})")
 
     return data
-
 
 # =========================  Generic Text-Based Imputation  =========================
 
