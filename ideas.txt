@@ -10,76 +10,6 @@
   Marca_Modelo
 
 
-- Revisar si los nulos de "Con camara de retroceso" tienen relacion con el Año:
-  Puede pasar que autos mas viejos no tengan ese dato cargado.
-
-- Mirar histogramas de variables importantes:
-  Evaluar si aplicar logaritmo ayuda a obtener distribuciones mas parecidas a una gaussiana.
-
-- Tratar outliers:
-  Primero revisar si son errores reales o autos premium.
-  Eliminar solo valores imposibles o claramente mal cargados.
-  Considerar usar log(Precio) para reducir el impacto de valores extremos.
-  Decidir que hacer con outliers que no tienen sentido.
-
-
-# 3. Despues de preprocesar
-Objetivo: analizar relaciones reales entre features y Precio.
-
-- Distribucion de Precio limpio.
-
-- Distribucion de log(Precio):
-  Sirve si Precio esta muy sesgado hacia valores altos.
-
-- Distribucion de variables numericas limpias:
-  Año, age, Kilometros y Puertas.
-
-- Precio vs Año:
-  Ver si los autos mas nuevos son mas caros.
-
-- Precio vs age:
-  Analizar depreciacion segun años de uso.
-
-- Precio vs Kilometros:
-  Ver el efecto del uso sobre el precio.
-
-- Scatter de Año vs Kilometros coloreado por Precio:
-  Grafico clave para ver estado del auto y precio al mismo tiempo.
-
-- Precio por Marca:
-  Boxplot o barplot de precio mediano por marca.
-
-- Precio por Modelo:
-  Usar solo modelos frecuentes, con suficiente cantidad de observaciones.
-
-- Precio por Color:
-  Boxplot de Precio por Color.
-  Barplot de precio mediano por Color.
-
-- Precio por Transmision, Combustible y Tipo de vendedor:
-  Comparar medianas y dispersion por categoria.
-
-- Frecuencias de categorias limpias:
-  Ver categorias dominantes y categorias raras.
-
-- Correlacion numerica:
-  Heatmap entre Precio, log(Precio), age, Año, Kilometros y Puertas.
-
-- Heatmap de precio mediano por Marca y Año:
-  Grafico de mayor nivel para ver marca y antiguedad juntas.
-
-- Lineas de precio mediano por age para marcas frecuentes:
-  Sirve para analizar depreciacion por marca.
-
-- Lineas de precio mediano por age para modelos frecuentes:
-  Sirve para ver que modelos mantienen mejor valor.
-
-- Boxplot de precios por Marca:
-  Ver dispersion general de precios por marca.
-
-- Ranking de IQR por Marca:
-  Identificar marcas con mayor o menor dispersion de precios.
-
 
 # 4. Graficos avanzados despues de preparar features
 Objetivo: entender la estructura global del dataset.
@@ -177,3 +107,7 @@ Objetivo: responder preguntas ajustadas por las caracteristicas del auto.
 6. Marca con menor dispersion de precios:
    Primero ranking de IQR por Marca.
    Luego ranking de desviacion de residuos por Marca.
+
+
+  IDEA:
+  COLUMNAS DE LUXURY, ALTA GAMA... SEGUN EL PRECIO. TAL VEZ ORDINALES

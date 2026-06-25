@@ -16,13 +16,6 @@ QUE HICIMOS CON LAS FEATURES EN EL Preprocesamiento
 14) motor --> borrada
 15) nuevas col: cilindrada tamaño cilindrada, tiene motor
 16) inputamos los null reeemplazando con titulo descripcion y version
-
-
-FALTAN:
-1) Descripcion
-2) version
-3) Título
-
-
-COMPLETAR CAMARA BASADO EN Años
-SACAR OUTLIERS
+17) Sacamos outliers de precio y km basaods en un rango
+18) Con camara de retrocesoso se complketo con 0 los nan mas viejos qu ele 200
+y se le agrego una columna de missin

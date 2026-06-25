@@ -471,6 +471,43 @@ def impute_missing_by_year(df, impute_col, year_threshold, year_col="Año", fill
 
     return data
 
+
+def add_missing_indicators_for_binary_columns(df, binary_cols=None, fill_value=0):
+    """
+    Creates missing indicators for selected binary columns and fills the original
+    missing values.
+
+    For each selected column, the function creates a new column named
+    '<column>_missing'. This indicator is 1 when the original value was missing
+    and 0 otherwise. Then, the missing values in the original binary column are
+    replaced with `fill_value`.
+
+    Arguments:
+        df (pd.DataFrame): dataset containing the binary columns
+        binary_cols (list[str] | None): binary columns where missing indicators
+            should be created
+        fill_value (int | float): value used to fill missing values in the
+            original binary columns
+
+    Returns:
+        pd.DataFrame: dataset with missing indicator columns added and original
+            binary columns filled
+    """
+    data = df.copy()
+    binary_cols = binary_cols or []
+
+    for column in binary_cols:
+        if column not in data.columns:
+            continue
+
+        missing_mask = _build_missing_mask(data[column])
+
+        data[f"{column}_missing"] = missing_mask.astype(int)
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+        data.loc[missing_mask, column] = fill_value
+
+    return data
+    
 # =========================  Generic Text-Based Imputation  =========================
 
 def fill_missing_from_text(df, target_col, text_cols, extractor,
@@ -820,28 +857,43 @@ def extract_backup_camera(value):
 
 # =========================  Encoding  =========================
 
-def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None):
+def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None, binary_missing_cols=None, binary_fill_value=0,):
     """
-    Applies one-hot encoding to categorical columns. During training it learns
-    and returns the category list for each column; during validation and test
-    it uses that saved list to guarantee the same set of dummy columns, filling
-    with zeros any category not present in that split.
+    Applies one-hot encoding to categorical columns and optionally handles
+    missing values in selected binary columns.
+
+    Categorical columns are encoded with `pd.get_dummies`. When `train=True`,
+    the function learns the categories present in the training data and returns
+    them in `categories_map`. When `train=False`, it uses the provided
+    `categories_map` so validation or test data keeps the same dummy columns as
+    training.
+
+    For selected binary columns, the function creates a missing indicator named
+    '<column>_missing' and fills the original missing values with
+    `binary_fill_value`. This keeps the binary feature usable while preserving
+    whether the value was originally missing.
 
     Arguments:
         df (pd.DataFrame): dataset to encode
-        categorical_cols (list[str] | None): categorical columns to encode;
-            defaults to an empty list if not provided
-        train (bool): if True, learns categories from df and returns them;
-            if False, categories_map must be provided
+        categorical_cols (list[str] | None): categorical columns to one-hot encode
+        train (bool): whether to learn categories from the current dataset
         categories_map (dict | None): categories learned from the training set,
             required when train=False
+        binary_missing_cols (list[str] | None): binary columns where missing
+            values should be converted into explicit missing indicators
+        binary_fill_value (int | float): value used to fill missing values in
+            the original binary columns after creating the missing indicator
 
     Returns:
-        tuple[pd.DataFrame, dict]: encoded dataset and learned categories map (if train=True)
-        pd.DataFrame: encoded dataset only (if train=False)
+        tuple[pd.DataFrame, dict]: encoded dataset and learned categories map if
+            train=True
+        pd.DataFrame: encoded dataset if train=False
     """
     data = df.copy()
     categorical_cols = categorical_cols or []
+    binary_missing_cols = binary_missing_cols or []
+
+    data = add_missing_indicators_for_binary_columns(data, binary_cols=binary_missing_cols, fill_value=binary_fill_value,)
 
     if train:
         categories_map = {
@@ -858,11 +910,12 @@ def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None)
         column_data = data[column].astype(str)
 
         dummies = pd.get_dummies(column_data, prefix=column, dtype=int)
-        expected_columns = [f"{column}_{category}" for category in categories_map[column]]
+        expected_columns = [
+            f"{column}_{category}"
+            for category in categories_map[column]
+        ]
 
-        # Force validation and test to keep the same dummy columns as train
         dummies = dummies.reindex(columns=expected_columns, fill_value=0)
-
         encoded_parts.append(dummies)
 
     data = data.drop(columns=categorical_cols, errors="ignore")
