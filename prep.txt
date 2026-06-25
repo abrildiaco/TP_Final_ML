@@ -22,3 +22,7 @@ FALTAN:
 1) Descripcion
 2) version
 3) Título
+
+
+COMPLETAR CAMARA BASADO EN Años
+SACAR OUTLIERS
