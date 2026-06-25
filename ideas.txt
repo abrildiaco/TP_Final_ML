@@ -1,63 +1,14 @@
 # Proyecto Final ML - Orden de trabajo e ideas de graficos
 
-# 1. Antes de preprocesar
-Objetivo: entender como viene el dataset y detectar problemas de calidad.
-
-- Ver frecuencias de categorias: 👍
-  Marca, Modelo, Color, Tipo de combustible, Transmision, Moneda y Tipo de vendedor.
-
-- Ver valores faltantes por columna: 👍
-  Identificar que columnas tienen muchos nulos y decidir despues si se imputan,
-  se agrupan como "Unknown" o se eliminan.
-
-- Ver distribucion de Precio separada por Moneda: 👍
-  No se pueden mezclar precios en pesos y dolares directamente.
-
-- Ver cantidad de publicaciones por Moneda: 👍
-  Entender cuantos autos estan en pesos y cuantos en dolares.
-
-- Ver distribucion raw de variables numericas: 👍
-  Año, Puertas, Kilometros y Precio.
-  Esto ayuda a detectar columnas mal tipeadas o valores raros.
-
-- Detectar outliers preliminares: 👍
-  Boxplots simples de Precio, Año y Kilometros antes de limpiar.
-
-
-# 2. Preprocesamiento antes del analisis principal
-Objetivo: dejar los datos comparables y listos para sacar conclusiones.
-
-- Eliminar o ignorar columnas de indice como "Unnamed: 0".👍
-
-- Separar el label: 👍
-  target = Precio.
-
-- Revisar Moneda: 👍
-  convertir todos los precios a una misma moneda.
-
-- Limpieza semántica -> Automática/automatica pasarlo a UNA. Lo mismo con COLOR. Unificar sinonimos 👍
-  "dos categorías distintas representan exactamente la misma información."
 
 - Modelo/Version: Modelos/Version con menos de 10/20 publicaciones pasan a ser 'Other' asi el modelo no aprende rudio
   CONSIDERAR ELIMINAR VERSION -> VER CORRELACION CON EL PRECIO
-
-- Motor: pasar de 2.0 Turbo a 2.0 y tartarlo como numerica 👍
-
-- Titulo: considerar eliminarla. Tiene muchísimo texto redundante. Además repite marca, modelo y version
-
-- Descripcion: tambien considerar eliminarla. Aunqie se puede hacer NLP
-
-- Convertir variables a numericas: 👍
-  Precio, Año, Puertas y Kilometros.
-  -> Tipo de vendedor, Marca, Color, Tipo de Combiustible con ONE-HOT
 
 - Crear nuevas variables:
   age = 2026 - Año.
   km_por_año = Kilómetros / Edad
   Marca_Modelo
 
-- Limpiar categorias: 👍
-  Normalizar Marca, Modelo, Color, Transmision, Combustible y Tipo de vendedor.
 
 - Revisar si los nulos de "Con camara de retroceso" tienen relacion con el Año:
   Puede pasar que autos mas viejos no tengan ese dato cargado.
@@ -65,22 +16,11 @@ Objetivo: dejar los datos comparables y listos para sacar conclusiones.
 - Mirar histogramas de variables importantes:
   Evaluar si aplicar logaritmo ayuda a obtener distribuciones mas parecidas a una gaussiana.
 
-- Tratar valores faltantes: 👍
-  Si falta Precio, eliminar la fila.
-  Si faltan categoricas, imputar como "Unknown" o evaluar si conviene eliminar.
-  Si faltan numericas, imputar despues del train/test split si se usan para modelado.
-
 - Tratar outliers:
   Primero revisar si son errores reales o autos premium.
   Eliminar solo valores imposibles o claramente mal cargados.
   Considerar usar log(Precio) para reducir el impacto de valores extremos.
   Decidir que hacer con outliers que no tienen sentido.
-
-- ENCODING (opciones): 👍
-  1) One Hot: Sirve perfecto para ridge, lasso, redes, knn
-      - marca, modelo, color, tipo vendedor, combustible, transimision
-  2) Label Encoding: Para árboles (Random Forest, XGBoost)
-
 
 
 # 3. Despues de preprocesar
@@ -181,6 +121,37 @@ Objetivo: responder preguntas ajustadas por las caracteristicas del auto.
 
 - Ranking de desviacion de residuos por Marca:
   Medir que marcas tienen precios mas consistentes despues de controlar caracteristicas.
+
+
+# 5. modelos
+
+1. Regresión Lineal
+  Se utiliza como modelo base o baseline. Permite tener una primera referencia del error predictivo y analizar si existe una relación aproximadamente lineal entre las variables del vehículo y el precio.
+
+
+2. Ridge Regression
+  Se incluye como una extensión de la regresión lineal con regularización L2. Es útil porque, luego del one-hot encoding de variables categóricas como marca, modelo y color, el dataset puede tener muchas columnas y posibles correlaciones entre variables.
+  La regularización ayuda a controlar coeficientes muy grandes y reduce el riesgo de overfitting.
+
+3. LASSO Regression
+  Se utiliza porque incorpora regularización L1, que puede llevar algunos coeficientes exactamente a cero. Esto permite hacer una especie de selección automática de variables.
+  Es útil para analizar qué variables parecen aportar más información al precio y para obtener un modelo lineal más simple.
+
+4. Random Forest Regressor
+  Se utiliza porque combina muchos árboles de decisión mediante bagging. Es un modelo capaz de capturar relaciones no lineales e interacciones entre variables sin tener que especificarlas manualmente.
+  Además, es robusto frente a outliers y permite analizar la importancia de las variables.
+
+5. Gradient Boosting Regressor
+  Se incluye porque los modelos de boosting construyen árboles de manera secuencial, donde cada nuevo árbol intenta corregir los errores del modelo anterior.
+  Es especialmente adecuado para datos tabulares y suele lograr muy buen rendimiento predictivo en problemas de regresión. Por eso es uno de los principales candidatos a obtener el menor RMSE.
+
+6. Red Neuronal / MLP Regressor
+  Se utiliza como modelo no lineal más flexible. Una red neuronal puede aprender relaciones complejas entre las variables de entrada y el precio.
+  Sin embargo, requiere normalización de variables, ajuste cuidadoso de hiperparámetros y control de overfitting mediante regularización o early stopping. Se incluye principalmente para comparar su desempeño frente a modelos clásicos de machine learning.
+
+## Criterio de comparación
+  Todos los modelos se evaluarán con métricas de regresión, principalmente RMSE, ya que es la métrica indicada en la consigna para la evaluación final. También se pueden reportar MAE y R² para complementar el análisis.
+  La comparación entre modelos permitirá observar si modelos simples sufren underfitting, si modelos más complejos logran capturar mejor la relación entre las variables y el precio, y si alguno presenta señales de overfitting.
 
 
 # 6. Preguntas de la consigna y donde se responden

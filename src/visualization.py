@@ -492,7 +492,7 @@ def plot_preliminary_outliers(data, numeric_cols=("Precio", "Año", "Kilómetros
     plt.show()
 
 
-def _iqr_bounds(values, iqr_multiplier=1.5):
+def iqr_bounds(values, iqr_multiplier=1.5):
     """
     Computes IQR lower and upper bounds for a numeric series.
 
@@ -513,7 +513,7 @@ def _iqr_bounds(values, iqr_multiplier=1.5):
     return lower_bound, upper_bound, iqr
 
 
-def _resolve_context_columns(data, value_col, group_col=None, context_cols=None):
+def resolve_context_columns(data, value_col, group_col=None, context_cols=None):
     """
     Resolves which columns should be attached to an outlier audit table.
 
@@ -569,7 +569,7 @@ def detect_iqr_outliers(data, value_col, group_col=None, context_cols=None,
     if side not in valid_sides:
         raise ValueError(f"side must be one of {valid_sides}.")
 
-    context_cols = _resolve_context_columns(data, value_col, group_col, context_cols)
+    context_cols = resolve_context_columns(data, value_col, group_col, context_cols)
     columns_to_keep = [value_col]
 
     if group_col is not None:
@@ -585,7 +585,7 @@ def detect_iqr_outliers(data, value_col, group_col=None, context_cols=None,
     outlier_tables = []
 
     if group_col is None:
-        lower_bound, upper_bound, iqr = _iqr_bounds(plot_data[value_col], iqr_multiplier)
+        lower_bound, upper_bound, iqr = iqr_bounds(plot_data[value_col], iqr_multiplier)
         group_bounds = [(None, plot_data, lower_bound, upper_bound, iqr)]
     else:
         group_bounds = []
@@ -594,7 +594,7 @@ def detect_iqr_outliers(data, value_col, group_col=None, context_cols=None,
             if len(group_data) < min_group_size:
                 continue
 
-            lower_bound, upper_bound, iqr = _iqr_bounds(group_data[value_col], iqr_multiplier)
+            lower_bound, upper_bound, iqr = iqr_bounds(group_data[value_col], iqr_multiplier)
             group_bounds.append((group_name, group_data, lower_bound, upper_bound, iqr))
 
     for group_name, group_data, lower_bound, upper_bound, iqr in group_bounds:
@@ -916,7 +916,7 @@ def plot_iqr_outlier_scatter(data, x_col, y_col, outlier_col=None,
 
 # ========================= Post-Preprocessing EDA =========================
 
-def _numeric_plot_data(data, columns):
+def numeric_plot_data(data, columns):
     """
     Builds a numeric-only copy for plotting selected columns.
 
@@ -936,7 +936,7 @@ def _numeric_plot_data(data, columns):
     return plot_data
 
 
-def _filter_frequent_categories(data, category_col, min_count=30, top_n=None):
+def filter_frequent_categories(data, category_col, min_count=30, top_n=None):
     """
     Keeps categories with enough observations for readable category plots.
 
@@ -977,7 +977,7 @@ def _category_price_data(data, category_col, price_col="Precio", min_count=30, t
     plot_data[price_col] = pd.to_numeric(plot_data[price_col], errors="coerce")
     plot_data = plot_data.dropna(subset=[price_col])
 
-    selected_categories = _filter_frequent_categories(
+    selected_categories = filter_frequent_categories(
         plot_data,
         category_col=category_col,
         min_count=min_count,
@@ -1077,7 +1077,7 @@ def plot_clean_numeric_distributions(data, numeric_cols=("Año", "Kilómetros", 
     Returns:
         None
     """
-    plot_data = _numeric_plot_data(data, numeric_cols)
+    plot_data = numeric_plot_data(data, numeric_cols)
     available_cols = plot_data.columns.tolist()
 
     if not available_cols:
@@ -1146,7 +1146,7 @@ def plot_price_vs_numeric(data, x_col, price_col="Precio", sample_size=None,
     Returns:
         None
     """
-    plot_data = _numeric_plot_data(data, [x_col, price_col]).dropna()
+    plot_data = numeric_plot_data(data, [x_col, price_col]).dropna()
 
     if sample_size is not None and len(plot_data) > sample_size:
         plot_data = plot_data.sample(sample_size, random_state=42)
@@ -1191,7 +1191,7 @@ def plot_year_kilometers_price_scatter(data, year_col="Año", km_col="Kilómetro
     Returns:
         None
     """
-    plot_data = _numeric_plot_data(data, [year_col, km_col, price_col]).dropna()
+    plot_data = numeric_plot_data(data, [year_col, km_col, price_col]).dropna()
 
     if km_percentile_range is not None:
         km_lower = plot_data[km_col].quantile(km_percentile_range[0])
@@ -1568,7 +1568,7 @@ def plot_numeric_correlation_heatmap(data, numeric_cols=None, feature_type="nume
             include_log_target=include_log_target,
         )
 
-    corr_data = _numeric_plot_data(plot_data, numeric_cols).dropna(axis=1, how="all")
+    corr_data = numeric_plot_data(plot_data, numeric_cols).dropna(axis=1, how="all")
     corr = corr_data.corr()
 
     if corr.empty:
@@ -1617,7 +1617,7 @@ def plot_numeric_correlation_heatmap(data, numeric_cols=None, feature_type="nume
     plt.show()
 
 
-def _binary_feature_columns(data, exclude_cols=None):
+def binary_feature_columns(data, exclude_cols=None):
     """
     Finds binary numeric columns in a dataset.
 
@@ -1636,7 +1636,7 @@ def _binary_feature_columns(data, exclude_cols=None):
     )
 
 
-def _feature_group_name(column):
+def feature_group_name(column):
     """
     Gets a readable group name from an encoded feature name.
 
@@ -1716,7 +1716,7 @@ def encoded_feature_target_correlation_table(data, target_col="Precio", feature_
 
         rows.append({
             "feature": feature,
-            "group": _feature_group_name(feature),
+            "group": feature_group_name(feature),
             "feature_type": "binary" if is_binary else "numeric",
             "frequency": frequency,
             "target_correlation": correlation,
@@ -1880,7 +1880,7 @@ def plot_top_target_correlations(data, target_col="Precio", feature_cols=None,
             target_col=target_col,
         )
     elif exclude_binary:
-        binary_cols = set(_binary_feature_columns(plot_data, exclude_cols=[target_col]))
+        binary_cols = set(binary_feature_columns(plot_data, exclude_cols=[target_col]))
         feature_cols = [column for column in feature_cols if column not in binary_cols]
 
     rows = []
@@ -1950,7 +1950,7 @@ def plot_median_price_heatmap(data, row_col="Marca", col_col="Año", price_col="
     plot_data[price_col] = pd.to_numeric(plot_data[price_col], errors="coerce")
     plot_data = plot_data.dropna(subset=[price_col])
 
-    selected_rows = _filter_frequent_categories(
+    selected_rows = filter_frequent_categories(
         plot_data,
         category_col=row_col,
         min_count=min_count,
@@ -2007,7 +2007,7 @@ def plot_median_price_by_age_lines(data, group_col, age_col="Año", price_col="P
     plot_data[price_col] = pd.to_numeric(plot_data[price_col], errors="coerce")
     plot_data = plot_data.dropna(subset=[age_col, price_col])
 
-    selected_groups = _filter_frequent_categories(
+    selected_groups = filter_frequent_categories(
         plot_data,
         category_col=group_col,
         min_count=min_count,
@@ -2126,3 +2126,35 @@ def plot_iqr_ranking_by_category(data, category_col="Marca", price_col="Precio",
     plt.show()
 
     return summary.reset_index(drop=True)
+
+
+# ========================= Modeling Graphics =========================
+def plot_regression_metrics(metrics_df, model_name="Linear Regression"):
+    """ Plots train and validation metrics for a regression model """
+    
+    metric_groups = {
+        "MSE": ("train_mse", "val_mse", FORMAL_COLORS["blue"]),
+        "RMSE": ("train_rmse", "val_rmse", FORMAL_COLORS["teal"]),
+        "MAE": ("train_mae", "val_mae", FORMAL_COLORS["gold"]),
+        "R²": ("train_r2", "val_r2", FORMAL_COLORS["red"]),
+    }
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
+    axes = axes.flatten()
+
+    fig.suptitle(f"{model_name} - Regression Metrics", fontsize=16, fontweight="bold",)
+
+    for ax, (metric_name, (train_col, val_col, color)) in zip(axes, metric_groups.items()):
+        values = [metrics_df[train_col].iloc[0], metrics_df[val_col].iloc[0]]
+
+        bars = ax.bar(["Train", "Validation"], values, color=color, alpha=0.9)
+
+        for bar, value in zip(bars, values):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{value:,.2f}", ha="center", va="bottom", fontsize=9)
+
+        ax.set_title(metric_name, fontweight="bold")
+        ax.set_ylabel(metric_name)
+        ax.grid(axis="y", alpha=0.25)
+
+    plt.tight_layout(rect=(0, 0, 1, 0.94))
+    plt.show()
