@@ -502,7 +502,7 @@ def add_missing_indicators_for_binary_columns(df, binary_cols=None, fill_value=0
 
         missing_mask = _build_missing_mask(data[column])
 
-        data[f"{column}_missing"] = missing_mask.astype(int)
+        data[f"{column} missing"] = missing_mask.astype(int)
         data[column] = pd.to_numeric(data[column], errors="coerce")
         data.loc[missing_mask, column] = fill_value
 
@@ -911,7 +911,7 @@ def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None,
 
         dummies = pd.get_dummies(column_data, prefix=column, dtype=int)
         expected_columns = [
-            f"{column}_{category}"
+            f"{column} {category}"
             for category in categories_map[column]
         ]
 
@@ -925,3 +925,11 @@ def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None,
         return data, categories_map
 
     return data
+
+
+# =========================  Feature Engeneering  =========================
+
+def ordinal_encoding(df, column, thresholds):
+    """
+    Encodes en existing/new column with ordinal encoding based on a given threshold
+    """
