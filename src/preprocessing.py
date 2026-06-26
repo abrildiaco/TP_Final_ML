@@ -502,7 +502,7 @@ def add_missing_indicators_for_binary_columns(df, binary_cols=None, fill_value=0
 
         missing_mask = _build_missing_mask(data[column])
 
-        data[f"{column} missing"] = missing_mask.astype(int)
+        data[f"{column}_missing"] = missing_mask.astype(int)
         data[column] = pd.to_numeric(data[column], errors="coerce")
         data.loc[missing_mask, column] = fill_value
 
@@ -722,6 +722,19 @@ def extract_engine_liters(value, require_engine_context=False, allow_start_numbe
     return np.nan
 
 
+def encode_engine_size(engine_liters):
+    if pd.isna(engine_liters):
+        return 0
+    if engine_liters <= 1.2:
+        return 1
+    if engine_liters <= 1.6:
+        return 2
+    if engine_liters <= 2.0:
+        return 3
+    if engine_liters <= 2.8:
+        return 4
+    return 5
+
 def extract_engine_liters_from_text(value):
     """
     Extracts engine displacement from text and returns it as a string.
@@ -874,7 +887,7 @@ def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None,
 
         dummies = pd.get_dummies(column_data, prefix=column, dtype=int)
         expected_columns = [
-            f"{column} {category}"
+            f"{column}_{category}"
             for category in categories_map[column]
         ]
 
