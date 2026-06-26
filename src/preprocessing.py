@@ -757,43 +757,6 @@ def extract_engine_liters_from_text(value):
     return engine_text
 
 
-def encode_engine_size(engine_liters):
-    """
-    Encodes engine displacement into an ordinal numeric group so the model
-    can treat engine size as an ordered feature without using raw liters.
-
-    Groups:
-        0 -> missing
-        1 -> up to 1.2 L  (small)
-        2 -> up to 1.6 L  (medium-small)
-        3 -> up to 2.0 L  (medium)
-        4 -> up to 2.8 L  (medium-large)
-        5 -> above 2.8 L  (large)
-
-    Arguments:
-        engine_liters (float): engine displacement in liters
-
-    Returns:
-        int: ordinal group from 0 (missing) to 5 (largest)
-    """
-    if pd.isna(engine_liters):
-        return 0
-
-    if engine_liters <= 1.2:
-        return 1
-
-    if engine_liters <= 1.6:
-        return 2
-
-    if engine_liters <= 2.0:
-        return 3
-
-    if engine_liters <= 2.8:
-        return 4
-
-    return 5
-
-
 def has_turbo(value, turbo_patterns):
     """
     Detects whether a text value contains indicators of turbocharging.
@@ -928,8 +891,3 @@ def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None,
 
 
 # =========================  Feature Engeneering  =========================
-
-def ordinal_encoding(df, column, thresholds):
-    """
-    Encodes en existing/new column with ordinal encoding based on a given threshold
-    """

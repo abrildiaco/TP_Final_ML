@@ -1997,6 +1997,226 @@ def plot_top_target_correlations(data, target_col="Precio", feature_cols=None,
     return correlation_table
 
 
+def one_hot_group_columns(data, prefix, min_frequency=0.0, max_frequency=1.0):
+    """
+    Selects one-hot encoded columns from a specific feature group.
+
+    Arguments:
+        data (pd.DataFrame): encoded dataset
+        prefix (str): one-hot prefix, for example "Marca" or "Modelo"
+        min_frequency (float): minimum column mean required
+        max_frequency (float): maximum column mean allowed
+
+    Returns:
+        list[str]: one-hot columns that match the prefix and frequency filters
+    """
+    columns = []
+    prefix_text = f"{prefix}_"
+
+    for column in data.columns:
+        if not column.startswith(prefix_text):
+            continue
+
+        values = pd.to_numeric(data[column], errors="coerce")
+        frequency = values.mean()
+
+        if pd.isna(frequency):
+            continue
+
+        if frequency < min_frequency or frequency > max_frequency:
+            continue
+
+        columns.append(column)
+
+    return columns
+
+
+def _clean_one_hot_label(column, prefix):
+    """
+    Removes the one-hot prefix from a column name for plot labels.
+
+    Arguments:
+        column (str): one-hot encoded column name
+        prefix (str): encoded group prefix
+
+    Returns:
+        str: readable category label
+    """
+    return str(column).replace(f"{prefix}_", "", 1)
+
+
+def one_hot_group_correlation_table(data, row_prefix="Marca", col_prefix="Modelo",
+                                    min_frequency=0.005, max_frequency=0.995):
+    """
+    Computes correlations between two groups of one-hot encoded columns.
+
+    This is useful for relationships such as Marca_* vs Modelo_*. Since both
+    sides are binary columns, the correlation is the phi correlation: positive
+    values mean that the two categories appear together more often, while
+    negative values mean they rarely appear together.
+
+    Arguments:
+        data (pd.DataFrame): encoded dataset
+        row_prefix (str): first one-hot prefix, used as heatmap rows
+        col_prefix (str): second one-hot prefix, used as heatmap columns
+        min_frequency (float): minimum frequency required for each one-hot column
+        max_frequency (float): maximum frequency allowed for each one-hot column
+
+    Returns:
+        pd.DataFrame: sorted table with one row per pair of encoded categories
+    """
+    row_cols = one_hot_group_columns(
+        data,
+        prefix=row_prefix,
+        min_frequency=min_frequency,
+        max_frequency=max_frequency,
+    )
+    col_cols = one_hot_group_columns(
+        data,
+        prefix=col_prefix,
+        min_frequency=min_frequency,
+        max_frequency=max_frequency,
+    )
+
+    if not row_cols:
+        raise ValueError(f"No one-hot columns found for prefix '{row_prefix}'.")
+
+    if not col_cols:
+        raise ValueError(f"No one-hot columns found for prefix '{col_prefix}'.")
+
+    encoded_data = data[row_cols + col_cols].apply(pd.to_numeric, errors="coerce")
+    correlation_matrix = encoded_data.corr().loc[row_cols, col_cols]
+
+    rows = []
+
+    for row_col in row_cols:
+        for col_col in col_cols:
+            correlation = correlation_matrix.loc[row_col, col_col]
+
+            if pd.isna(correlation):
+                continue
+
+            rows.append({
+                "row_feature": row_col,
+                "col_feature": col_col,
+                row_prefix: _clean_one_hot_label(row_col, row_prefix),
+                col_prefix: _clean_one_hot_label(col_col, col_prefix),
+                "row_frequency": encoded_data[row_col].mean(),
+                "col_frequency": encoded_data[col_col].mean(),
+                "correlation": correlation,
+                "abs_correlation": abs(correlation),
+            })
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values("abs_correlation", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
+def plot_one_hot_group_correlation_heatmap(data, row_prefix="Marca", col_prefix="Modelo",
+                                           top_n_pairs=40, top_n_rows=15, top_n_cols=20,
+                                           min_frequency=0.005, max_frequency=0.995,
+                                           title=None, annotate=None):
+    """
+    Plots a compact heatmap between two one-hot encoded feature groups.
+
+    The function first finds the strongest pairwise correlations between both
+    groups, then plots only the rows and columns involved in those strongest
+    pairs. This keeps large groups like Marca and Modelo readable.
+
+    Arguments:
+        data (pd.DataFrame): encoded dataset
+        row_prefix (str): one-hot prefix shown in rows
+        col_prefix (str): one-hot prefix shown in columns
+        top_n_pairs (int): number of strongest pairs used to choose rows/columns
+        top_n_rows (int): maximum number of row categories shown
+        top_n_cols (int): maximum number of column categories shown
+        min_frequency (float): minimum one-hot frequency required
+        max_frequency (float): maximum one-hot frequency allowed
+        title (str | None): plot title
+        annotate (bool | None): whether to write correlation values inside cells.
+            If None, annotation is used only for small heatmaps
+
+    Returns:
+        pd.DataFrame: sorted pairwise correlation table
+    """
+    correlation_table = one_hot_group_correlation_table(
+        data,
+        row_prefix=row_prefix,
+        col_prefix=col_prefix,
+        min_frequency=min_frequency,
+        max_frequency=max_frequency,
+    )
+
+    selected_pairs = correlation_table.head(top_n_pairs)
+    selected_rows = list(dict.fromkeys(selected_pairs["row_feature"]))[:top_n_rows]
+    selected_cols = list(dict.fromkeys(selected_pairs["col_feature"]))[:top_n_cols]
+
+    if not selected_rows or not selected_cols:
+        raise ValueError("No one-hot pairs available to plot after filtering.")
+
+    encoded_data = data[selected_rows + selected_cols].apply(pd.to_numeric, errors="coerce")
+    correlation_matrix = encoded_data.corr().loc[selected_rows, selected_cols]
+
+    row_labels = [_clean_one_hot_label(column, row_prefix) for column in selected_rows]
+    col_labels = [_clean_one_hot_label(column, col_prefix) for column in selected_cols]
+
+    if annotate is None:
+        annotate = correlation_matrix.size <= 120
+
+    fig_width = max(8, 0.45 * len(selected_cols) + 3)
+    fig_height = max(5, 0.35 * len(selected_rows) + 2)
+    fig, ax = plt.subplots(figsize=(fig_width, fig_height))
+
+    image = ax.imshow(
+        correlation_matrix.values,
+        cmap="coolwarm",
+        vmin=-1,
+        vmax=1,
+        aspect="auto",
+    )
+
+    ax.set_xticks(range(len(selected_cols)))
+    ax.set_xticklabels(col_labels, rotation=45, ha="right")
+    ax.set_yticks(range(len(selected_rows)))
+    ax.set_yticklabels(row_labels)
+
+    if annotate:
+        for row_index in range(len(selected_rows)):
+            for col_index in range(len(selected_cols)):
+                value = correlation_matrix.iloc[row_index, col_index]
+
+                if pd.isna(value):
+                    continue
+
+                ax.text(
+                    col_index,
+                    row_index,
+                    f"{value:.2f}",
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                    color="black",
+                )
+
+    colorbar = fig.colorbar(image, ax=ax)
+    colorbar.set_label("Correlación")
+
+    default_title = (
+        f"Correlación entre {row_prefix} y {col_prefix} one-hot "
+        f"(top {top_n_pairs} pares)"
+    )
+    ax.set_title(title or default_title, fontsize=14, fontweight="bold")
+    ax.set_xlabel(col_prefix)
+    ax.set_ylabel(row_prefix)
+
+    plt.tight_layout()
+    plt.show()
+
+    return correlation_table
+
+
 def plot_median_price_heatmap(data, row_col="Marca", col_col="Año", price_col="Precio",
                               top_n_rows=12, min_count=30, title=None):
     """
