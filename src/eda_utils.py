@@ -64,11 +64,7 @@ def explore_target(y, currency=None):
     if currency is None:
         groups = [("All", target)]
     else:
-        target_with_currency = pd.DataFrame({
-            "target": target,
-            "currency": currency,
-        })
-
+        target_with_currency = pd.DataFrame({"target": target, "currency": currency})
         groups = [("All", target_with_currency["target"])]
 
         for currency_value, group_df in target_with_currency.groupby("currency", dropna=False):
@@ -89,140 +85,32 @@ def explore_target(y, currency=None):
             "q3": non_missing.quantile(0.75) if len(non_missing) else np.nan,
             "max": non_missing.max() if len(non_missing) else np.nan,
             "std": non_missing.std() if len(non_missing) else np.nan,
-            "zero_count": (group_target == 0).sum(),
+            "zero_count": (group_target == 0).sum()
         })
 
     return pd.DataFrame(rows)
 
 
-# ========================= Feature Summaries =========================
+# ========================= Feature Analysis =========================
 
-def format_value_counts(value_counts, max_items):
+def feature_types_summary(df):
     """
-    Formats category counts into a readable string.
+    Returns the data type of each feature.
 
     Arguments:
-        value_counts (pd.Series): category counts sorted by frequency
-        max_items (int): maximum number of categories to show
+        df (pd.DataFrame): dataset to analyze
 
     Returns:
-        str: formatted category counts
+        pd.DataFrame: feature names and their data types
     """
-    if value_counts.empty:
-        return np.nan
-
-    shown_values = value_counts.head(max_items)
-
-    return " | ".join(
-        f"{category}: {count}"
-        for category, count in shown_values.items()
+    return (
+        pd.DataFrame({
+            "column": df.columns,
+            "dtype": df.dtypes.astype(str).values
+        }).sort_values("dtype").reset_index(drop=True)
     )
 
-
-def explore_features(df, top_n_categories=5, rare_threshold=1):
-    """
-    Builds separate exploratory summaries for numeric and categorical features.
-
-    Arguments:
-        df (pd.DataFrame): dataset to summarize column by column
-        top_n_categories (int): number of categories to show in preview columns
-        rare_threshold (int): maximum frequency used to count rare categories
-
-    Returns:
-        dict[str, pd.DataFrame]: numeric and categorical feature summaries
-    """
-    numeric_rows = []
-    categorical_rows = []
-    row_count = len(df)
-
-    # Ignore CSV-generated index columns
-    columns = [
-        column for column in df.columns
-        if not column.startswith("Unnamed:")
-    ]
-
-    for column in columns:
-        series = df[column]
-        non_missing = series.dropna()
-        missing_count = series.isna().sum()
-        unique_count = series.nunique(dropna=True)
-
-        base_row = {
-            "feature": column,
-            "dtype": str(series.dtype),
-            "non_missing": series.count(),
-            "missing": missing_count,
-            "missing_%": round(missing_count / row_count * 100, 2) if row_count else np.nan,
-            "unique": unique_count,
-            "unique_%": round(unique_count / row_count * 100, 2) if row_count else np.nan,
-        }
-
-        if pd.api.types.is_numeric_dtype(series):
-            # Numeric features get range, center, dispersion, and outlier checks
-            q1 = non_missing.quantile(0.25) if len(non_missing) else np.nan
-            q3 = non_missing.quantile(0.75) if len(non_missing) else np.nan
-            iqr = q3 - q1 if len(non_missing) else np.nan
-
-            lower_bound = q1 - 1.5 * iqr if len(non_missing) else np.nan
-            upper_bound = q3 + 1.5 * iqr if len(non_missing) else np.nan
-
-            outlier_mask = (
-                (series < lower_bound) | (series > upper_bound)
-                if len(non_missing)
-                else pd.Series(False, index=series.index)
-            )
-
-            numeric_rows.append({
-                **base_row,
-                "min": non_missing.min() if len(non_missing) else np.nan,
-                "max": non_missing.max() if len(non_missing) else np.nan,
-                "mean": non_missing.mean() if len(non_missing) else np.nan,
-                "median": non_missing.median() if len(non_missing) else np.nan,
-                "std": non_missing.std() if len(non_missing) else np.nan,
-                "q1": q1,
-                "q3": q3,
-                "zero_count": (series == 0).sum(),
-                "outlier_count": outlier_mask.sum(),
-                "outlier_%": round(outlier_mask.mean() * 100, 2),
-            })
-
-        else:
-            value_counts = series.value_counts(dropna=True)
-            least_frequent = value_counts.tail(top_n_categories).sort_values()
-
-            # Categorical features get category previews and frequency summaries
-            categorical_rows.append({
-                **base_row,
-                "categories_preview": format_value_counts(value_counts, top_n_categories),
-                "most_frequent": value_counts.index[0] if not value_counts.empty else np.nan,
-                "most_frequent_count": value_counts.iloc[0] if not value_counts.empty else np.nan,
-                "most_frequent_%": (
-                    round(value_counts.iloc[0] / row_count * 100, 2)
-                    if row_count and not value_counts.empty
-                    else np.nan
-                ),
-                "least_frequent_preview": format_value_counts(least_frequent, top_n_categories),
-                "rare_categories": (value_counts <= rare_threshold).sum(),
-            })
-
-    numeric_columns = [
-        "feature", "dtype", "non_missing", "missing", "missing_%",
-        "min", "max", "mean", "median", "std", "q1", "q3",
-        "zero_count", "outlier_count", "outlier_%", "unique", "unique_%",
-    ]
-
-    categorical_columns = [
-        "feature", "dtype", "categories_preview", "most_frequent",
-        "most_frequent_count", "most_frequent_%", "least_frequent_preview",
-        "rare_categories", "missing", "missing_%", "non_missing",
-        "unique", "unique_%",
-    ]
-
-    return {
-        "numeric": pd.DataFrame(numeric_rows).reindex(columns=numeric_columns),
-        "categorical": pd.DataFrame(categorical_rows).reindex(columns=categorical_columns),
-    }
-
+# ========================= Feature Summaries =========================
 
 def duplicate_rows_summary(df):
     """
@@ -234,10 +122,7 @@ def duplicate_rows_summary(df):
     Returns:
         pd.DataFrame: duplicated row summary
     """
-    return pd.DataFrame({
-        "total_rows": [len(df)],
-        "duplicate_rows": [df.duplicated().sum()],
-    })
+    return pd.DataFrame({"total_rows": [len(df)], "duplicate_rows": [df.duplicated().sum()]})
 
 
 def missing_values_summary(df, missing_values=("missing",)):
@@ -269,7 +154,7 @@ def missing_values_summary(df, missing_values=("missing",)):
             rows.append({
                 "column": column,
                 "missing_count": missing_count,
-                "missing_percentage": round(missing_count / len(df) * 100, 2) if len(df) else np.nan,
+                "missing_percentage": round(missing_count / len(df) * 100, 2) if len(df) else np.nan
             })
 
     return (
@@ -292,7 +177,7 @@ def unique_values_summary(df):
     summary = pd.DataFrame({
         "column": df.columns,
         "unique_values": df.nunique(dropna=True).values,
-        "unique_pct": (df.nunique(dropna=True).values / len(df) * 100).round(2),
+        "unique_pct": (df.nunique(dropna=True).values / len(df) * 100).round(2)
     })
 
     return summary.sort_values("unique_values", ascending=False)
@@ -316,7 +201,7 @@ def get_constant_columns(df):
         if len(unique_values) <= 1:
             constant_columns.append({
                 "column": column,
-                "unique_value": unique_values[0] if len(unique_values) == 1 else None,
+                "unique_value": unique_values[0] if len(unique_values) == 1 else None
             })
 
     return pd.DataFrame(constant_columns)
@@ -387,11 +272,7 @@ def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
                     continue
 
                 # Calculate similarity between normalized category values
-                similarity = SequenceMatcher(
-                    None,
-                    normalized_values[category],
-                    normalized_values[other_category],
-                ).ratio()
+                similarity = SequenceMatcher(None, normalized_values[category], normalized_values[other_category]).ratio()
 
                 if similarity >= similarity_threshold:
                     group.append(other_category)
@@ -408,13 +289,13 @@ def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
                     "similar_values": " | ".join(group),
                     "normalized_values": " | ".join(normalized_group),
                     "total_count": value_counts[group].sum(),
-                    "n_values_grouped": len(group),
+                    "n_values_grouped": len(group)
                 })
 
     if not rows:
         return pd.DataFrame(columns=[
             "feature", "similar_values", "normalized_values",
-            "total_count", "n_values_grouped",
+            "total_count", "n_values_grouped"
         ])
 
     return (

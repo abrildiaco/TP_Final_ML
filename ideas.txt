@@ -9,6 +9,8 @@
   km_por_año = Kilómetros / Edad
   Marca_Modelo
 
+- CHEQUEAR SI LOS VALORES EN COLUMNAS COMO COLOR APORTAN RUIDOI.
+por ejemplo, vimos que los autos color gris son los mas caros, pero porque tal vez solo hay a la venta colores gris osucoro tope de gama --> RUIDO
 
 
 # 4. Graficos avanzados despues de preparar features

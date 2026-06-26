@@ -195,7 +195,6 @@ def drop_irrelevant_columns(df, columns_to_drop):
         pd.DataFrame: dataset without the selected columns
     """
     data = df.copy()
-
     return data.drop(columns=columns_to_drop, errors="ignore")
 
 
@@ -333,9 +332,7 @@ def detect_outliers(df, rules, mode="flag", flag_col="is_outlier"):
 
 # =========================  Price Transformation  =========================
 
-def convert_peso_prices_to_usd(df, price_col="Precio", currency_col="Moneda",
-                                peso_symbol="$", exchange_rate=(895.25 + 913) / 2,
-                                copy=True):
+def convert_peso_prices_to_usd(df, exchange_rate, price_col="Precio", currency_col="Moneda", peso_symbol="$", copy=True):
     """
     Converts prices listed in Argentine pesos to USD using a fixed exchange
     rate, then drops the currency column since all prices are unified.
@@ -470,6 +467,158 @@ def impute_missing_by_year(df, impute_col, year_threshold, year_col="Año", fill
           f"with {fill_value} (older than {year_threshold})")
 
     return data
+
+
+def impute_missing_by_group_consensus(df, target_col, group_cols, missing_values=("missing",),
+                                      min_known_count=1, separator=" | ",
+                                      return_audit=True):
+    """
+    Fills missing values in a target column using the consensus value observed
+    in rows with the same group key. A missing value is imputed only when all
+    known values inside that group agree, which avoids filling ambiguous groups.
+
+    For example, if every known row for the same Marca + Modelo has
+    "Con cámara de retroceso" equal to 1, missing rows for that Marca + Modelo
+    are filled with 1. If the group contains both 0 and 1, it is left unchanged.
+
+    Arguments:
+        df (pd.DataFrame): dataset to transform
+        target_col (str): column with missing values to fill
+        group_cols (list[str] | tuple[str]): columns used to define comparable
+            groups, such as ("Marca", "Modelo")
+        missing_values (tuple[str]): string values treated as missing in addition
+            to NaN
+        min_known_count (int): minimum number of non-missing rows required in a
+            group before using its consensus value
+        separator (str): text used to join normalized group values in the audit
+        return_audit (bool): whether to return the audit table alongside the
+            dataset
+
+    Returns:
+        pd.DataFrame: imputed dataset if return_audit is False
+        tuple[pd.DataFrame, pd.DataFrame]: imputed dataset and audit table if
+            return_audit is True
+    """
+    data = df.copy()
+    group_cols = list(group_cols)
+
+    missing_columns = [column for column in [target_col] + group_cols if column not in data.columns]
+    if missing_columns:
+        raise ValueError(f"Columns not found in dataframe: {missing_columns}")
+
+    normalized_groups = pd.DataFrame(index=data.index)
+
+    for column in group_cols:
+        normalized_groups[column] = data[column].apply(normalize_category_text)
+
+    group_missing_mask = pd.Series(False, index=data.index)
+
+    for column in group_cols:
+        group_missing_mask = group_missing_mask | _build_missing_mask(
+            normalized_groups[column],
+            extra_missing=missing_values,
+        )
+
+    target_missing_mask = _build_missing_mask(data[target_col], extra_missing=missing_values)
+    target_values = pd.to_numeric(data[target_col], errors="coerce")
+
+    reference = normalized_groups.copy()
+    reference[target_col] = target_values
+    reference = reference.loc[~target_missing_mask & ~group_missing_mask].copy()
+
+    consensus_rows = []
+
+    for group_values, group_df in reference.groupby(group_cols, dropna=False):
+        if not isinstance(group_values, tuple):
+            group_values = (group_values,)
+
+        known_values = group_df[target_col].dropna()
+        unique_values = sorted(known_values.unique())
+
+        if len(known_values) < min_known_count or len(unique_values) != 1:
+            continue
+
+        row = dict(zip(group_cols, group_values))
+        row["fill_value"] = unique_values[0]
+        row["n_known"] = len(known_values)
+        row["group_key"] = separator.join(str(value) for value in group_values)
+        consensus_rows.append(row)
+
+    if consensus_rows:
+        consensus_table = pd.DataFrame(consensus_rows)
+    else:
+        consensus_table = pd.DataFrame(columns=group_cols + ["fill_value", "n_known", "group_key"])
+
+    fill_lookup = consensus_table.set_index(group_cols)["fill_value"] if len(consensus_table) else pd.Series(dtype=float)
+    known_count_lookup = consensus_table.set_index(group_cols)["n_known"] if len(consensus_table) else pd.Series(dtype=int)
+    group_key_lookup = consensus_table.set_index(group_cols)["group_key"] if len(consensus_table) else pd.Series(dtype="object")
+
+    group_index = pd.MultiIndex.from_frame(normalized_groups[group_cols])
+    fill_values = pd.Series(group_index.map(fill_lookup), index=data.index)
+    n_known_values = pd.Series(group_index.map(known_count_lookup), index=data.index)
+    group_keys = pd.Series(group_index.map(group_key_lookup), index=data.index)
+
+    data, audit_table = _fill_missing_from_candidates(
+        data,
+        target_col=target_col,
+        fill_values=fill_values,
+        audit_data={
+            "group_key": group_keys,
+            "n_known_group_values": n_known_values,
+        },
+        missing_values=missing_values,
+        log_label="group consensus",
+        return_audit=True,
+    )
+
+    audit_table = audit_table[audit_table["was_filled"]].copy()
+    audit_table = audit_table[[
+        "row_index",
+        "group_key",
+        "n_known_group_values",
+        "fill_value",
+    ]]
+    audit_table["target_col"] = target_col
+
+    if return_audit:
+        return data, audit_table
+
+    return data
+
+
+def impute_backup_camera_by_brand_model(df, camera_col="Con cámara de retroceso",
+                                        brand_col="Marca", model_col="Modelo",
+                                        missing_values=("missing",),
+                                        min_known_count=1, return_audit=True):
+    """
+    Fills missing backup-camera values using the consensus observed for the same
+    normalized Marca + Modelo pair.
+
+    Arguments:
+        df (pd.DataFrame): dataset to transform
+        camera_col (str): backup-camera binary column
+        brand_col (str): brand column
+        model_col (str): model column
+        missing_values (tuple[str]): string values treated as missing in addition
+            to NaN
+        min_known_count (int): minimum known rows required for a Marca + Modelo
+            pair before imputing
+        return_audit (bool): whether to return the audit table alongside the
+            dataset
+
+    Returns:
+        pd.DataFrame: imputed dataset if return_audit is False
+        tuple[pd.DataFrame, pd.DataFrame]: imputed dataset and audit table if
+            return_audit is True
+    """
+    return impute_missing_by_group_consensus(
+        df,
+        target_col=camera_col,
+        group_cols=(brand_col, model_col),
+        missing_values=missing_values,
+        min_known_count=min_known_count,
+        return_audit=return_audit,
+    )
 
 
 def add_missing_indicators_for_binary_columns(df, binary_cols=None, fill_value=0):
