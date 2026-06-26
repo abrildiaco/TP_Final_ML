@@ -2215,7 +2215,7 @@ def plot_regression_metrics(metrics_df, model_name="Linear Regression"):
     fig, axes = plt.subplots(2, 2, figsize=(11, 8))
     axes = axes.flatten()
 
-    fig.suptitle(f"{model_name} - Regression Metrics", fontsize=16, fontweight="bold",)
+    fig.suptitle(f"{model_name} - Metrics", fontsize=16, fontweight="bold",)
 
     for ax, (metric_name, (train_col, val_col, color)) in zip(axes, metric_groups.items()):
         values = [metrics_df[train_col].iloc[0], metrics_df[val_col].iloc[0]]

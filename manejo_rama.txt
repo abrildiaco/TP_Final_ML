@@ -24,7 +24,7 @@ git merge origin/rama-abru
 git switch rama-abru
 git pull origin rama-abru
 git fetch origin
-git merge origin/rama-abru
+git merge origin/rama-isa
 
 /////////////
 
