@@ -3,15 +3,8 @@ from sklearn.impute import KNNImputer
 from sklearn.preprocessing import StandardScaler
 
 
-def impute_missing_knn(
-    df,
-    target_col,
-    feature_cols,
-    n_neighbors=5,
-    round_result=False,
-    clip_range=None,
-    return_audit=True
-):
+def impute_missing_knn(df, target_col, feature_cols, n_neighbors=5,
+                       round_result=False, clip_range=None, return_audit=True):
     """
     Imputes missing values in a target column using KNN.
 

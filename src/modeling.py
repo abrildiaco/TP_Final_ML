@@ -36,6 +36,225 @@ def _get_predictions(model, X, use_log_target=False):
     return predictions
 
 
+def build_predictions_table(y_train, train_predictions, y_val, val_predictions):
+    """
+    Builds a row-level prediction table for train and validation sets.
+
+    Arguments:
+        y_train (pd.Series): training target in original scale
+        train_predictions (np.ndarray): training predictions in original scale
+        y_val (pd.Series): validation target in original scale
+        val_predictions (np.ndarray): validation predictions in original scale
+
+    Returns:
+        pd.DataFrame: prediction table with true values, predictions and errors
+    """
+    train_index = y_train.index if isinstance(y_train, pd.Series) else np.arange(len(y_train))
+    val_index = y_val.index if isinstance(y_val, pd.Series) else np.arange(len(y_val))
+
+    train_results = pd.DataFrame({
+        "split": "train",
+        "row_index": train_index,
+        "y_true": y_train,
+        "y_pred": train_predictions,
+    }).reset_index(drop=True)
+
+    val_results = pd.DataFrame({
+        "split": "validation",
+        "row_index": val_index,
+        "y_true": y_val,
+        "y_pred": val_predictions,
+    }).reset_index(drop=True)
+
+    predictions = pd.concat([train_results, val_results], axis=0, ignore_index=True)
+    predictions["residual"] = predictions["y_true"] - predictions["y_pred"]
+    predictions["abs_error"] = predictions["residual"].abs()
+    predictions["signed_pct_error"] = np.where(
+        predictions["y_true"] != 0,
+        predictions["residual"] / predictions["y_true"] * 100,
+        np.nan,
+    )
+    predictions["abs_pct_error"] = predictions["signed_pct_error"].abs()
+
+    return predictions
+
+
+def build_context(features, split, context_cols):
+    available_cols = [column for column in context_cols if column in features.columns]
+    context = features[available_cols].copy()
+    context["split"] = split
+    context["row_index"] = features.index
+    return context
+
+
+def attach_prediction_context(predictions, X_train, X_val, context_cols=None):
+    """
+    Adds original vehicle information to a prediction table.
+
+    Arguments:
+        predictions (pd.DataFrame): output from build_predictions_table
+        X_train (pd.DataFrame): training features before one-hot encoding
+        X_val (pd.DataFrame): validation features before one-hot encoding
+        context_cols (list[str] | None): original columns to attach
+
+    Returns:
+        pd.DataFrame: predictions with vehicle context columns
+    """
+    default_context_cols = [
+        "Marca",
+        "Modelo",
+        "Versión",
+        "Año",
+        "Kilómetros",
+        "Cilindrada",
+        "Motor",
+        "Transmisión",
+        "Tipo de combustible",
+        "Color",
+        "Tipo de vendedor",
+        "Con cámara de retroceso",
+    ]
+
+    if context_cols is None:
+        context_cols = default_context_cols
+
+    context_cols = [
+        column for column in context_cols
+        if column in X_train.columns or column in X_val.columns
+    ]
+
+    context = pd.concat(
+        [
+            build_context(X_train, "train", default_context_cols),
+            build_context(X_val, "validation", default_context_cols),
+        ],
+        axis=0,
+        ignore_index=True,
+    )
+
+    predictions_with_context = predictions.merge(
+        context,
+        on=["split", "row_index"],
+        how="left",
+    )
+
+    metric_cols = [
+        column for column in predictions.columns
+        if column not in ["split", "row_index"]
+    ]
+    ordered_cols = ["split", "row_index"] + context_cols + metric_cols
+
+    return predictions_with_context[
+        [column for column in ordered_cols if column in predictions_with_context.columns]
+    ]
+
+
+def top_prediction_errors(predictions, split="validation", n=20, sort_by="abs_error"):
+    """
+    Returns the rows where the model makes the largest prediction errors.
+
+    Arguments:
+        predictions (pd.DataFrame): prediction table, optionally with context
+        split (str | None): split to inspect. Use None to inspect all rows
+        n (int): number of rows to return
+        sort_by (str): error column used for ranking
+
+    Returns:
+        pd.DataFrame: top error rows
+    """
+    if sort_by not in predictions.columns:
+        raise ValueError(f"Column '{sort_by}' is not present in predictions.")
+
+    data = predictions.copy()
+
+    if split is not None:
+        data = data[data["split"] == split]
+
+    return data.sort_values(sort_by, ascending=False).head(n).reset_index(drop=True)
+
+
+def summarize_prediction_errors(predictions, group_cols, split="validation", min_count=10):
+    """
+    Summarizes model errors by one or more vehicle attributes.
+
+    Positive mean_residual means the model tends to underpredict that group.
+    Negative mean_residual means it tends to overpredict that group.
+
+    Arguments:
+        predictions (pd.DataFrame): prediction table with context columns
+        group_cols (str | list[str]): columns used to group rows
+        split (str | None): split to inspect. Use None to inspect all rows
+        min_count (int): minimum number of rows required per group
+
+    Returns:
+        pd.DataFrame: grouped error summary
+    """
+    if isinstance(group_cols, str):
+        group_cols = [group_cols]
+
+    missing_cols = [column for column in group_cols if column not in predictions.columns]
+
+    if missing_cols:
+        raise ValueError(f"Missing grouping columns: {missing_cols}.")
+
+    data = predictions.copy()
+
+    if split is not None:
+        data = data[data["split"] == split]
+
+    summary = (
+        data
+        .groupby(group_cols, dropna=False)
+        .agg(
+            count=("abs_error", "size"),
+            mae=("abs_error", "mean"),
+            median_abs_error=("abs_error", "median"),
+            rmse=("residual", lambda values: np.sqrt(np.mean(np.square(values)))),
+            mean_residual=("residual", "mean"),
+            median_y_true=("y_true", "median"),
+            median_y_pred=("y_pred", "median"),
+            mean_abs_pct_error=("abs_pct_error", "mean"),
+        )
+        .reset_index()
+    )
+
+    summary = summary[summary["count"] >= min_count].copy()
+    summary["bias_direction"] = np.where(
+        summary["mean_residual"] > 0,
+        "underprediction",
+        "overprediction",
+    )
+
+    return summary.sort_values("mae", ascending=False).reset_index(drop=True)
+
+
+def evaluate_regression_predictions(y_train, train_predictions, y_val, val_predictions):
+    """
+    Computes regression metrics from train and validation predictions.
+
+    Arguments:
+        y_train (pd.Series): training target in original scale
+        train_predictions (np.ndarray): training predictions in original scale
+        y_val (pd.Series): validation target in original scale
+        val_predictions (np.ndarray): validation predictions in original scale
+
+    Returns:
+        pd.DataFrame: train and validation regression metrics
+    """
+    metrics = {
+        "train_mse": mean_squared_error(y_train, train_predictions),
+        "val_mse": mean_squared_error(y_val, val_predictions),
+        "train_rmse": root_mean_squared_error(y_train, train_predictions),
+        "val_rmse": root_mean_squared_error(y_val, val_predictions),
+        "train_mae": mean_absolute_error(y_train, train_predictions),
+        "val_mae": mean_absolute_error(y_val, val_predictions),
+        "train_r2": r2_score(y_train, train_predictions),
+        "val_r2": r2_score(y_val, val_predictions),
+    }
+
+    return pd.DataFrame([metrics])
+
+
 def evaluate_regression_model(model, X_train, y_train, X_val, y_val, use_log_target=False):
     """
     Evaluates a regression model on train and validation sets.
@@ -58,18 +277,7 @@ def evaluate_regression_model(model, X_train, y_train, X_val, y_val, use_log_tar
     train_predictions = _get_predictions(model, X_train, use_log_target)
     val_predictions = _get_predictions(model, X_val, use_log_target)
 
-    metrics = {
-        "train_mse": mean_squared_error(y_train, train_predictions),
-        "val_mse": mean_squared_error(y_val, val_predictions),
-        "train_rmse": root_mean_squared_error(y_train, train_predictions),
-        "val_rmse": root_mean_squared_error(y_val, val_predictions),
-        "train_mae": mean_absolute_error(y_train, train_predictions),
-        "val_mae": mean_absolute_error(y_val, val_predictions),
-        "train_r2": r2_score(y_train, train_predictions),
-        "val_r2": r2_score(y_val, val_predictions),
-    }
-
-    return pd.DataFrame([metrics])
+    return evaluate_regression_predictions(y_train, train_predictions, y_val, val_predictions)
 
 
 def train_regression_model(model, X_train, y_train, X_val, y_val, use_log_target=False):
@@ -89,16 +297,19 @@ def train_regression_model(model, X_train, y_train, X_val, y_val, use_log_target
         use_log_target (bool): whether to train using log1p(y_train)
 
     Returns:
-        tuple: trained model and metrics table
+        tuple: trained model, metrics table and prediction table
     """
     target_train = np.log1p(y_train) if use_log_target else y_train
 
     model.fit(X_train, target_train)
 
-    metrics = evaluate_regression_model(model, X_train, y_train, X_val, y_val,
-                                        use_log_target = use_log_target,)
+    train_predictions = _get_predictions(model, X_train, use_log_target)
+    val_predictions = _get_predictions(model, X_val, use_log_target)
 
-    return model, metrics
+    metrics = evaluate_regression_predictions(y_train, train_predictions, y_val, val_predictions)
+    predictions = build_predictions_table(y_train, train_predictions, y_val, val_predictions)
+
+    return model, metrics, predictions
 
 # =========================  Linear Regression  =========================
 
@@ -219,7 +430,7 @@ def train_xgboost(X_train, y_train, X_val, y_val, use_log_target=False, **model_
         **model_params: optional parameters passed to build_xgboost_model
 
     Returns:
-        tuple: trained model and metrics table
+        tuple: trained model, metrics table and prediction table
     """
     model = build_xgboost_model(**model_params)
 

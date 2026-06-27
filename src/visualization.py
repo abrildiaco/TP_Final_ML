@@ -3,8 +3,7 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-from eda_utils import missing_values_summary, unique_values_summary
+import seaborn as sns
 
 
 # ========================= Plot Style =========================
@@ -19,42 +18,75 @@ FORMAL_COLORS = {
 }
 
 
-def _display_label(column):
+def _resolve_price_currency(data=None, currency=None, currency_col="Moneda"):
+    """
+    Resolves a currency label only when it is explicit or unambiguous.
+
+    Arguments:
+        data (pd.DataFrame | None): dataset used in the plot
+        currency (str | None): explicit currency label
+        currency_col (str): currency column name
+
+    Returns:
+        str | None: currency label when it can be safely shown
+    """
+    if currency is not None and str(currency).strip():
+        return str(currency)
+
+    if data is not None and currency_col in data.columns:
+        currencies = data[currency_col].dropna().astype(str).unique()
+
+        if len(currencies) == 1:
+            return currencies[0]
+
+    return None
+
+
+def _display_label(column, data=None, currency=None, currency_col="Moneda"):
     """
     Returns a readable plot label for project columns.
 
     Arguments:
         column (str): column name used in a plot
+        data (pd.DataFrame | None): dataset used to infer currency when possible
+        currency (str | None): explicit currency label
+        currency_col (str): currency column name
 
     Returns:
         str: display label
     """
+    resolved_currency = _resolve_price_currency(
+        data=data,
+        currency=currency,
+        currency_col=currency_col,
+    )
+
     if column == "Precio":
-        return "Precio (USD)"
+        return f"Precio ({resolved_currency})" if resolved_currency else "Precio"
 
-    if column == "log_Precio":
-        return "log(Precio USD)"
-
-    if column == "log(Precio)":
-        return "log(Precio USD)"
+    if column in ["log_Precio", "log(Precio)"]:
+        return f"log({_display_label('Precio', data=data, currency=currency, currency_col=currency_col)})"
 
     return str(column)
 
 
-def _log_display_label(column):
+def _log_display_label(column, data=None, currency=None, currency_col="Moneda"):
     """
     Returns a readable log-scale label for project columns.
 
     Arguments:
         column (str): column name used in a plot
+        data (pd.DataFrame | None): dataset used to infer currency when possible
+        currency (str | None): explicit currency label
+        currency_col (str): currency column name
 
     Returns:
         str: display label for the log-transformed column
     """
     if column == "Precio":
-        return "log(Precio USD)"
+        return f"log({_display_label(column, data=data, currency=currency, currency_col=currency_col)})"
 
-    return f"log({_display_label(column)})"
+    return f"log({_display_label(column, data=data, currency=currency, currency_col=currency_col)})"
 
 
 def _add_top_n_to_title(title, top_n, item_label="categorías"):
@@ -138,7 +170,11 @@ def plot_price_distribution_by_currency(data, price_col="Precio", currency_col="
     if n_currencies == 1:
         axes = [axes]
 
-    fig.suptitle(title or f"Distribución de {_display_label(price_col)} por moneda", fontsize=15, fontweight="bold")
+    fig.suptitle(
+        title or f"Distribución de {_display_label(price_col, data=plot_data, currency_col=currency_col)} por moneda",
+        fontsize=15,
+        fontweight="bold",
+    )
 
     for ax, currency in zip(axes, currencies):
         prices = plot_data.loc[plot_data[currency_col] == currency, price_col]
@@ -160,7 +196,7 @@ def plot_price_distribution_by_currency(data, price_col="Precio", currency_col="
         )
 
         ax.set_title(f"Moneda: {currency}", fontweight="bold")
-        ax.set_xlabel(_display_label(price_col))
+        ax.set_xlabel(_display_label(price_col, currency=currency))
         ax.set_ylabel("Cantidad de publicaciones")
         ax.grid(axis="y", alpha=0.25)
         ax.legend()
@@ -329,8 +365,8 @@ def plot_raw_numeric_distributions(data, numeric_cols=("Año", "Kilómetros"), b
         ax.hist(plot_values, bins=column_bins, color=FORMAL_COLORS["blue"], edgecolor="white", alpha=0.85)
         ax.axvline( values.median(), color=FORMAL_COLORS["gold"], linestyle="--", linewidth=2, label=f"Mediana: {values.median():.0f}")
 
-        ax.set_title(_display_label(column), fontweight="bold")
-        ax.set_xlabel(_display_label(column))
+        ax.set_title(_display_label(column, data=data), fontweight="bold")
+        ax.set_xlabel(_display_label(column, data=data))
         ax.set_ylabel("Frecuencia")
         ax.grid(axis="y", alpha=0.25)
         ax.legend()
@@ -344,7 +380,7 @@ def plot_raw_numeric_distributions(data, numeric_cols=("Año", "Kilómetros"), b
 
 # ========================= Outlier Plots =========================
 
-def plot_preliminary_outliers(data, numeric_cols=("Precio", "Año", "Kilómetros"), currency_col="Moneda", title="Outliers preliminares"):
+def plot_preliminary_outliers(data, numeric_cols=("Precio", "Año", "Puertas"), currency_col="Moneda", title="Outliers preliminares"):
     """
     Plots preliminary boxplots for selected numeric variables before preprocessing.
 
@@ -369,8 +405,7 @@ def plot_preliminary_outliers(data, numeric_cols=("Precio", "Año", "Kilómetros
 
     for ax, column in zip(axes, available_cols):
         plot_data = data[[column]].copy()
-        plot_data[column] = pd.to_numeric(plot_data[column], errors="coerce")
-
+    
         if column == "Precio" and currency_col in data.columns:
             plot_data[currency_col] = data[currency_col]
             plot_data = plot_data.dropna(subset=[column, currency_col])
@@ -402,8 +437,8 @@ def plot_preliminary_outliers(data, numeric_cols=("Precio", "Año", "Kilómetros
                 medianprops=dict(color=FORMAL_COLORS["red"], linewidth=2)
             )
 
-        ax.set_title(_display_label(column), fontweight="bold")
-        ax.set_ylabel(_display_label(column))
+        ax.set_title(_display_label(column, data=plot_data, currency_col=currency_col), fontweight="bold")
+        ax.set_ylabel(_display_label(column, data=plot_data, currency_col=currency_col))
         ax.grid(axis="y", alpha=0.25)
 
     plt.tight_layout(rect=(0, 0, 1, 0.9))
@@ -644,7 +679,7 @@ def plot_iqr_outliers(data, value_col, group_col=None, context_cols=None,
 
     if group_col is None:
         plot_data["_x_position"] = 0
-        x_labels = [_display_label(value_col)]
+        x_labels = [_display_label(value_col, data=data)]
         figsize = (6, 5)
     else:
         if outliers.empty:
@@ -713,8 +748,8 @@ def plot_iqr_outliers(data, value_col, group_col=None, context_cols=None,
 
     ax.set_xticks(range(len(x_labels)))
     ax.set_xticklabels(x_labels, rotation=45, ha="right")
-    ax.set_ylabel(_display_label(value_col))
-    default_title = f"Outliers de {_display_label(value_col)}"
+    ax.set_ylabel(_display_label(value_col, data=data))
+    default_title = f"Outliers de {_display_label(value_col, data=data)}"
     ax.set_title(_add_top_n_to_title(title or default_title, top_n_labels, "outliers etiquetados"), fontsize=14, fontweight="bold")
     ax.grid(axis="y", alpha=0.25)
     ax.legend()
@@ -818,10 +853,10 @@ def plot_iqr_outlier_scatter(data, x_col, y_col, outlier_col=None,
             color=FORMAL_COLORS["red"],
         )
 
-    default_title = f"{_display_label(y_col)} vs {_display_label(x_col)} con outliers resaltados"
+    default_title = f"{_display_label(y_col, data=data)} vs {_display_label(x_col, data=data)} con outliers resaltados"
     ax.set_title(_add_top_n_to_title(title or default_title, top_n_labels, "outliers etiquetados"), fontsize=14, fontweight="bold")
-    ax.set_xlabel(_display_label(x_col))
-    ax.set_ylabel(_display_label(y_col))
+    ax.set_xlabel(_display_label(x_col, data=data))
+    ax.set_ylabel(_display_label(y_col, data=data))
     ax.grid(alpha=0.25)
     ax.legend()
 
@@ -830,6 +865,81 @@ def plot_iqr_outlier_scatter(data, x_col, y_col, outlier_col=None,
 
     return outliers
 
+
+def plot_outliers_by_category(df, category_col, price_col="Precio", 
+                            min_count=10, n_splits=2, figsize=(14, 6)):
+    """
+    Plots price distribution by category using boxplots, filtering out
+    categories with too few observations and splitting the chart into
+    multiple subplots ordered by median price. Useful for datasets with
+    many categories where a single plot would be unreadable.
+
+    Arguments:
+        df (pd.DataFrame): dataset to analyze
+        category_col (str): categorical column to group by (e.g. "Marca")
+        price_col (str): numeric column to plot, defaults to "Precio"
+        min_count (int): minimum number of rows a category must have to be
+            included, defaults to 10
+        n_splits (int): number of subplots to split the categories into,
+            defaults to 2
+        figsize (tuple): size of each individual subplot, defaults to (14, 6)
+
+    Returns:
+        None
+    """
+    # Filter categories with enough observations
+    valid_categories = (
+        df[category_col]
+        .value_counts()
+        .loc[lambda counts: counts >= min_count]
+        .index
+    )
+
+    df_filtered = df[df[category_col].isin(valid_categories)].copy()
+
+    n_filtered = df[category_col].nunique() - len(valid_categories)
+    print(f"Filtered out {n_filtered} categories with fewer than {min_count} rows.")
+    print(f"Plotting {len(valid_categories)} categories split into {n_splits} charts.")
+
+    # Sort categories by median price descending
+    order = (
+        df_filtered.groupby(category_col)[price_col]
+        .median()
+        .sort_values(ascending=False)
+        .index
+    )
+
+    # Split sorted categories evenly across subplots
+    splits = np.array_split(order, n_splits)
+
+    fig, axes = plt.subplots(n_splits, 1, figsize=(figsize[0], figsize[1] * n_splits))
+
+    if n_splits == 1:
+        axes = [axes]
+
+    for i, (ax, split_categories) in zip(axes, splits):
+        split_data = df_filtered[df_filtered[category_col].isin(split_categories)]
+
+        sns.boxplot(
+            data=split_data,
+            x=category_col,
+            y=price_col,
+            order=split_categories,
+            ax=ax,
+            color = FORMAL_COLORS["red"]
+        )
+
+        ax.set_title(
+            f"{price_col} by {category_col} — "
+            f"ranked {i + 1} of {n_splits} (highest to lowest median)",
+            fontweight="bold"
+        )
+        
+        ax.tick_params(axis="x", rotation=45)
+        ax.set_xlabel("")
+
+    plt.tight_layout()
+    plt.show()
 
 # ========================= Missingness Analysis =========================
 
@@ -949,11 +1059,11 @@ def plot_price_distribution(data, price_col="Precio", bins=45, log_transform=Fal
 
     if log_transform:
         prices = np.log1p(prices[prices > 0])
-        x_label = _log_display_label(price_col)
-        default_title = f"Distribución de {_log_display_label(price_col)}"
+        x_label = _log_display_label(price_col, data=data)
+        default_title = f"Distribución de {_log_display_label(price_col, data=data)}"
     else:
-        x_label = _display_label(price_col)
-        default_title = f"Distribución de {_display_label(price_col)}"
+        x_label = _display_label(price_col, data=data)
+        default_title = f"Distribución de {_display_label(price_col, data=data)}"
 
     fig, ax = plt.subplots(figsize=(9, 4.8))
 
@@ -1037,8 +1147,8 @@ def plot_clean_numeric_distributions(data, numeric_cols=("Año", "Kilómetros", 
             label=f"Mediana: {values.median():,.0f}",
         )
 
-        ax.set_title(_display_label(column), fontweight="bold")
-        ax.set_xlabel(_display_label(column))
+        ax.set_title(_display_label(column, data=data), fontweight="bold")
+        ax.set_xlabel(_display_label(column, data=data))
         ax.set_ylabel("Frecuencia")
         ax.grid(axis="y", alpha=0.25)
         ax.legend()
@@ -1081,9 +1191,9 @@ def plot_price_vs_numeric(data, x_col, price_col="Precio", sample_size=None,
         s=18,
     )
 
-    ax.set_title(title or f"{_display_label(price_col)} vs {_display_label(x_col)}", fontsize=14, fontweight="bold")
-    ax.set_xlabel(_display_label(x_col))
-    ax.set_ylabel(_display_label(price_col))
+    ax.set_title(title or f"{_display_label(price_col, data=data)} vs {_display_label(x_col, data=data)}", fontsize=14, fontweight="bold")
+    ax.set_xlabel(_display_label(x_col, data=data))
+    ax.set_ylabel(_display_label(price_col, data=data))
     ax.grid(alpha=0.25)
 
     plt.tight_layout()
@@ -1149,11 +1259,11 @@ def plot_year_kilometers_price_scatter(data, year_col="Año", km_col="Kilómetro
     )
 
     colorbar = fig.colorbar(scatter, ax=ax)
-    colorbar.set_label(_display_label(price_col))
+    colorbar.set_label(_display_label(price_col, data=data))
 
-    ax.set_title(f"{year_col} vs {km_col} coloreado por {_display_label(price_col)}", fontsize=14, fontweight="bold")
-    ax.set_xlabel(_display_label(year_col))
-    ax.set_ylabel(_display_label(km_col))
+    ax.set_title(f"{year_col} vs {km_col} coloreado por {_display_label(price_col, data=data)}", fontsize=14, fontweight="bold")
+    ax.set_xlabel(_display_label(year_col, data=data))
+    ax.set_ylabel(_display_label(km_col, data=data))
     ax.grid(alpha=0.25)
 
     plt.tight_layout()
@@ -1196,9 +1306,9 @@ def plot_median_price_by_category(data, category_col, price_col="Precio", top_n=
     ax.barh(summary.index, summary.values, color=FORMAL_COLORS["teal"], alpha=0.9)
     _add_horizontal_bar_labels(ax, summary.values)
 
-    default_title = f"{_display_label(price_col)} mediano por {category_col}"
+    default_title = f"{_display_label(price_col, data=data)} mediano por {category_col}"
     ax.set_title(_add_top_n_to_title(title or default_title, top_n, "categorías"), fontsize=14, fontweight="bold")
-    ax.set_xlabel(f"Mediana de {_display_label(price_col)}")
+    ax.set_xlabel(f"Mediana de {_display_label(price_col, data=data)}")
     ax.set_ylabel(category_col)
     ax.grid(axis="x", alpha=0.25)
 
@@ -1247,10 +1357,10 @@ def plot_price_boxplot_by_category(data, category_col, price_col="Precio", top_n
         flierprops=dict(marker="o", markersize=3, alpha=0.25),
     )
 
-    default_title = f"Distribución de {_display_label(price_col)} por {category_col}"
+    default_title = f"Distribución de {_display_label(price_col, data=data)} por {category_col}"
     ax.set_title(_add_top_n_to_title(title or default_title, top_n, "categorías"), fontsize=14, fontweight="bold")
     ax.set_xlabel(category_col)
-    ax.set_ylabel(_display_label(price_col))
+    ax.set_ylabel(_display_label(price_col, data=data))
     ax.tick_params(axis="x", rotation=45)
     ax.grid(axis="y", alpha=0.25)
 
@@ -1514,8 +1624,8 @@ def plot_numeric_correlation_heatmap(data, numeric_cols=None, feature_type="nume
 
     ax.set_xticks(range(len(corr.columns)))
     ax.set_yticks(range(len(corr.index)))
-    ax.set_xticklabels([_display_label(column) for column in corr.columns], rotation=45, ha="right", fontsize=label_fontsize)
-    ax.set_yticklabels([_display_label(column) for column in corr.index], fontsize=label_fontsize)
+    ax.set_xticklabels([_display_label(column, data=plot_data) for column in corr.columns], rotation=45, ha="right", fontsize=label_fontsize)
+    ax.set_yticklabels([_display_label(column, data=plot_data) for column in corr.index], fontsize=label_fontsize)
 
     if annotate:
         # Write correlation values only when the heatmap is small enough to read
@@ -1713,7 +1823,7 @@ def plot_encoded_feature_correlation_heatmaps(data, target_col="Precio", feature
     )
 
     axes = np.asarray(axes).reshape(-1)
-    target_label = _log_display_label(target_col) if use_log_target else _display_label(target_col)
+    target_label = _log_display_label(target_col, data=data) if use_log_target else _display_label(target_col, data=data)
 
     for ax, group in zip(axes, groups):
         group_data = (
@@ -1758,7 +1868,7 @@ def plot_encoded_feature_correlation_heatmaps(data, target_col="Precio", feature
     colorbar.set_label(f"Correlación con {target_label}")
 
     suptitle = _add_top_n_to_title(
-        f"Correlación de features encoded con {_display_label(target_col)}",
+        f"Correlación de features encoded con {_display_label(target_col, data=data)}",
         top_n_per_group,
         "features por grupo",
     )
@@ -1843,7 +1953,7 @@ def plot_top_target_correlations(data, target_col="Precio", feature_cols=None,
 
     ax.barh(plot_data["feature"], plot_data["target_correlation"], color=colors, alpha=0.9)
     ax.axvline(0, color="black", linewidth=1)
-    target_label = _log_display_label(target_col) if use_log_target else _display_label(target_col)
+    target_label = _log_display_label(target_col, data=data) if use_log_target else _display_label(target_col, data=data)
     default_title = f"Features más correlacionadas con {target_label}"
     ax.set_title(_add_top_n_to_title(title or default_title, top_n, "features"), fontsize=14, fontweight="bold")
     ax.set_xlabel("Correlación")
@@ -2123,74 +2233,12 @@ def plot_median_price_heatmap(data, row_col="Marca", col_col="Año", price_col="
     ax.set_yticklabels(pivot_table.index)
 
     colorbar = fig.colorbar(image, ax=ax)
-    colorbar.set_label(f"Mediana de {_display_label(price_col)}")
+    colorbar.set_label(f"Mediana de {_display_label(price_col, data=data)}")
 
-    default_title = f"{_display_label(price_col)} mediano por {row_col} y {col_col}"
+    default_title = f"{_display_label(price_col, data=data)} mediano por {row_col} y {col_col}"
     ax.set_title(_add_top_n_to_title(title or default_title, top_n_rows, "filas"), fontsize=14, fontweight="bold")
     ax.set_xlabel(col_col)
     ax.set_ylabel(row_col)
-
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_median_price_by_age_lines(data, group_col, age_col="Año", price_col="Precio",
-                                   top_n=8, min_count=80, title=None):
-    """
-    Plots median price by a time variable for frequent groups.
-
-    Arguments:
-        data (pd.DataFrame): preprocessed dataset
-        group_col (str): grouping column, such as brand or model
-        age_col (str): vehicle age or year column
-        price_col (str): price column name
-        top_n (int): maximum number of frequent groups to plot
-        min_count (int): minimum number of rows required per group
-        title (str | None): plot title
-
-    Returns:
-        None
-    """
-    plot_data = data[[group_col, age_col, price_col]].copy()
-    plot_data[group_col] = plot_data[group_col].fillna("missing").astype(str)
-    plot_data[age_col] = pd.to_numeric(plot_data[age_col], errors="coerce")
-    plot_data[price_col] = pd.to_numeric(plot_data[price_col], errors="coerce")
-    plot_data = plot_data.dropna(subset=[age_col, price_col])
-
-    selected_groups = filter_frequent_categories(
-        plot_data,
-        category_col=group_col,
-        min_count=min_count,
-        top_n=top_n,
-    )
-
-    plot_data = plot_data[plot_data[group_col].isin(selected_groups)]
-
-    summary = (
-        plot_data
-        .groupby([group_col, age_col])[price_col]
-        .median()
-        .reset_index()
-    )
-
-    fig, ax = plt.subplots(figsize=(10, 5.5))
-
-    for group_name, group_data in summary.groupby(group_col):
-        group_data = group_data.sort_values(age_col)
-        ax.plot(
-            group_data[age_col],
-            group_data[price_col],
-            marker="o",
-            linewidth=2,
-            label=group_name,
-        )
-
-    default_title = f"{_display_label(price_col)} mediano por {age_col} y {group_col}"
-    ax.set_title(_add_top_n_to_title(title or default_title, top_n, "grupos"), fontsize=14, fontweight="bold")
-    ax.set_xlabel(age_col)
-    ax.set_ylabel(f"Mediana de {_display_label(price_col)}")
-    ax.grid(alpha=0.25)
-    ax.legend(title=group_col, bbox_to_anchor=(1.02, 1), loc="upper left")
 
     plt.tight_layout()
     plt.show()
@@ -2213,15 +2261,49 @@ def plot_median_price_by_year_lines(data, group_col, year_col="Año", price_col=
     Returns:
         None
     """
-    plot_median_price_by_age_lines(
-        data=data,
-        group_col=group_col,
-        age_col=year_col,
-        price_col=price_col,
-        top_n=top_n,
+    plot_data = data[[group_col, year_col, price_col]].copy()
+    plot_data[group_col] = plot_data[group_col].fillna("missing").astype(str)
+    plot_data[year_col] = pd.to_numeric(plot_data[year_col], errors="coerce")
+    plot_data[price_col] = pd.to_numeric(plot_data[price_col], errors="coerce")
+    plot_data = plot_data.dropna(subset=[year_col, price_col])
+
+    selected_groups = filter_frequent_categories(
+        plot_data,
+        category_col=group_col,
         min_count=min_count,
-        title=title,
+        top_n=top_n,
     )
+
+    plot_data = plot_data[plot_data[group_col].isin(selected_groups)]
+
+    summary = (
+        plot_data
+        .groupby([group_col, year_col])[price_col]
+        .median()
+        .reset_index()
+    )
+
+    fig, ax = plt.subplots(figsize=(10, 5.5))
+
+    for group_name, group_data in summary.groupby(group_col):
+        group_data = group_data.sort_values(year_col)
+        ax.plot(
+            group_data[year_col],
+            group_data[price_col],
+            marker="o",
+            linewidth=2,
+            label=group_name,
+        )
+
+    default_title = f"{_display_label(price_col, data=data)} mediano por {year_col} y {group_col}"
+    ax.set_title(_add_top_n_to_title(title or default_title, top_n, "grupos"), fontsize=14, fontweight="bold")
+    ax.set_xlabel(year_col)
+    ax.set_ylabel(f"Mediana de {_display_label(price_col, data=data)}")
+    ax.grid(alpha=0.25)
+    ax.legend(title=group_col, bbox_to_anchor=(1.02, 1), loc="upper left")
+
+    plt.tight_layout()
+    plt.show()
 
 
 def plot_iqr_ranking_by_category(data, category_col="Marca", price_col="Precio",
@@ -2240,13 +2322,8 @@ def plot_iqr_ranking_by_category(data, category_col="Marca", price_col="Precio",
     Returns:
         pd.DataFrame: IQR ranking table used for the plot
     """
-    plot_data = _category_price_data(
-        data,
-        category_col=category_col,
-        price_col=price_col,
-        min_count=min_count,
-        top_n=None,
-    )
+    plot_data = _category_price_data(data, category_col=category_col, price_col=price_col,
+                                     min_count=min_count, top_n=None,)
 
     summary = (
         plot_data
@@ -2268,9 +2345,9 @@ def plot_iqr_ranking_by_category(data, category_col="Marca", price_col="Precio",
     ax.barh(plot_summary[category_col], plot_summary["iqr"], color=FORMAL_COLORS["red"], alpha=0.85)
     _add_horizontal_bar_labels(ax, plot_summary["iqr"].values)
 
-    default_title = f"Ranking de IQR de {_display_label(price_col)} por {category_col}"
+    default_title = f"Ranking de IQR de {_display_label(price_col, data=data)} por {category_col}"
     ax.set_title(_add_top_n_to_title(title or default_title, top_n, "categorías"), fontsize=14, fontweight="bold")
-    ax.set_xlabel(f"IQR de {_display_label(price_col)}")
+    ax.set_xlabel(f"IQR de {_display_label(price_col, data=data)}")
     ax.set_ylabel(category_col)
     ax.grid(axis="x", alpha=0.25)
 
