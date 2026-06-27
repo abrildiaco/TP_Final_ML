@@ -78,104 +78,6 @@ def _add_top_n_to_title(title, top_n, item_label="categorías"):
     return f"{title} (top {top_n} {item_label})"
 
 
-# ========================= Missing and Unique Values =========================
-
-def plot_missing_values(data, top_n=None, title="Valores faltantes por columna"):
-    """
-    Plots the percentage of missing values by column.
-
-    Arguments:
-        data (pd.DataFrame): dataset to analyze
-        top_n (int | None): number of columns to show
-        title (str): plot title
-
-    Returns:
-        None
-    """
-    missing_table = missing_values_summary(data)
-
-    if top_n is not None:
-        missing_table = missing_table.head(top_n)
-
-    if missing_table.empty:
-        print("No hay valores faltantes")
-        return
-
-    fig, ax = plt.subplots(figsize=(10, max(4, 0.35 * len(missing_table))))
-
-    bars = ax.barh(
-        missing_table["column"],
-        missing_table["missing_percentage"],
-        color=FORMAL_COLORS["blue"],
-    )
-
-    ax.invert_yaxis()
-
-    # Add percentage labels next to each bar
-    for bar, value in zip(bars, missing_table["missing_percentage"]):
-        ax.text(
-            value + 0.5,
-            bar.get_y() + bar.get_height() / 2,
-            f"{value:.1f}%",
-            va="center",
-            fontsize=9,
-        )
-
-    ax.set_title(_add_top_n_to_title(title, top_n, "columnas"), fontsize=14, fontweight="bold")
-    ax.set_xlabel("Porcentaje de valores faltantes")
-    ax.set_ylabel("Columna")
-    ax.grid(axis="x", alpha=0.25)
-
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_unique_values(data, top_n=None, title="Unique values by column"):
-    """
-    Plots the number of unique values per column.
-
-    Arguments:
-        data (pd.DataFrame): dataset to analyze
-        top_n (int | None): number of columns to show
-        title (str): plot title
-
-    Returns:
-        None
-    """
-    unique_table = unique_values_summary(data)
-
-    if top_n is not None:
-        unique_table = unique_table.head(top_n)
-
-    fig, ax = plt.subplots(figsize=(10, max(4, 0.35 * len(unique_table))))
-
-    bars = ax.barh(
-        unique_table["column"],
-        unique_table["unique_values"],
-        color=FORMAL_COLORS["red"],
-    )
-
-    ax.invert_yaxis()
-
-    # Add count labels next to each bar
-    for bar, value in zip(bars, unique_table["unique_values"]):
-        ax.text(
-            value,
-            bar.get_y() + bar.get_height() / 2,
-            f" {int(value)}",
-            va="center",
-            fontsize=9,
-        )
-
-    ax.set_title(_add_top_n_to_title(title, top_n, "columnas"), fontsize=14, fontweight="bold")
-    ax.set_xlabel("Number of unique values")
-    ax.set_ylabel("Column")
-    ax.grid(axis="x", alpha=0.25)
-
-    plt.tight_layout()
-    plt.show()
-
-
 # ========================= Currency Plots =========================
 
 def plot_currency_counts(data, currency_col="Moneda", title="Cantidad de publicaciones por moneda"):
@@ -194,23 +96,12 @@ def plot_currency_counts(data, currency_col="Moneda", title="Cantidad de publica
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
 
-    bars = ax.bar(
-        currency_counts.index.astype(str),
-        currency_counts.values,
-        color=FORMAL_COLORS["teal"],
-    )
+    bars = ax.bar(currency_counts.index.astype(str), currency_counts.values, color=FORMAL_COLORS["teal"])
 
     # Add absolute count labels above each bar
     for bar in bars:
         height = bar.get_height()
-        ax.text(
-            bar.get_x() + bar.get_width() / 2,
-            height,
-            f"{int(height)}",
-            ha="center",
-            va="bottom",
-            fontsize=10,
-        )
+        ax.text(bar.get_x() + bar.get_width() / 2, height, f"{int(height)}", ha="center", va="bottom", fontsize=10)
 
     ax.set_title(title, fontsize=14, fontweight="bold")
     ax.set_xlabel("Moneda")
@@ -312,13 +203,7 @@ def plot_categorical_counts(df, categorical_columns=None, ignored_columns=None, 
 
     n_rows = math.ceil(n_plots / n_cols)
 
-    fig, axes = plt.subplots(
-        n_rows,
-        n_cols,
-        figsize=(figsize_per_plot[0] * n_cols, figsize_per_plot[1] * n_rows),
-        constrained_layout=True,
-    )
-
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(figsize_per_plot[0] * n_cols, figsize_per_plot[1] * n_rows), constrained_layout=True)
     axes = pd.Series(np.asarray(axes).flatten())
 
     for ax, column in zip(axes, categorical_columns):
@@ -345,7 +230,6 @@ def plot_categorical_counts(df, categorical_columns=None, ignored_columns=None, 
         ax.axis("off")
 
     fig.suptitle(f"Categorical Feature Counts - Top {top_n}", fontsize=16, fontweight="bold")
-
     plt.show()
 
 
@@ -364,7 +248,7 @@ def plot_compact_value_counts(df, columns, top_n=10, n_cols=2):
     """
     n_rows = math.ceil(len(columns) / n_cols)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 4 * n_rows))
+    _, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 4 * n_rows))
     axes = np.asarray(axes).flatten()
 
     bar_color = FORMAL_COLORS["teal"]
@@ -373,12 +257,7 @@ def plot_compact_value_counts(df, columns, top_n=10, n_cols=2):
         counts = df[column].value_counts(dropna=False).head(top_n)
         counts = counts.sort_values()
 
-        bars = ax.barh(
-            counts.index.astype(str),
-            counts.values,
-            color=bar_color,
-            alpha=0.9,
-        )
+        bars = ax.barh(counts.index.astype(str), counts.values, color=bar_color, alpha=0.9)
 
         max_value = counts.values.max()
         ax.set_xlim(0, max_value * 1.15)
@@ -386,14 +265,7 @@ def plot_compact_value_counts(df, columns, top_n=10, n_cols=2):
         # Add count labels with extra space to avoid overlap
         for bar in bars:
             width = bar.get_width()
-            ax.text(
-                width + max_value * 0.015,
-                bar.get_y() + bar.get_height() / 2,
-                f"{int(width)}",
-                va="center",
-                ha="left",
-                fontsize=9,
-            )
+            ax.text(width + max_value * 0.015, bar.get_y() + bar.get_height() / 2, f"{int(width)}", va="center", ha="left", fontsize=9)
 
         ax.set_title(_add_top_n_to_title(str(column), top_n, "categorías"), fontweight="bold", fontsize=12)
         ax.set_xlabel("Count")
@@ -411,7 +283,7 @@ def plot_compact_value_counts(df, columns, top_n=10, n_cols=2):
 
 # ========================= Numeric Distributions =========================
 
-def plot_raw_numeric_distributions(data, numeric_cols=("Año", "Puertas", "Kilómetros", "Precio"), bins=35, title="Distribución raw de variables numéricas", use_percentile_range=True):
+def plot_raw_numeric_distributions(data, numeric_cols=("Año", "Kilómetros"), bins=35, title="Distribución raw de variables numéricas", use_percentile_range=True):
     """
     Plots raw distributions for selected numeric variables.
 
@@ -447,28 +319,15 @@ def plot_raw_numeric_distributions(data, numeric_cols=("Año", "Puertas", "Kiló
         else:
             plot_values = values.copy()
 
-        if column in ["Año", "Puertas"]:
+        if column == "Año":
             min_value = int(np.floor(plot_values.min()))
             max_value = int(np.ceil(plot_values.max()))
             column_bins = np.arange(min_value, max_value + 2) - 0.5
         else:
             column_bins = bins
 
-        ax.hist(
-            plot_values,
-            bins=column_bins,
-            color=FORMAL_COLORS["blue"],
-            edgecolor="white",
-            alpha=0.85,
-        )
-
-        ax.axvline(
-            values.median(),
-            color=FORMAL_COLORS["gold"],
-            linestyle="--",
-            linewidth=2,
-            label=f"Mediana: {values.median():.0f}",
-        )
+        ax.hist(plot_values, bins=column_bins, color=FORMAL_COLORS["blue"], edgecolor="white", alpha=0.85)
+        ax.axvline( values.median(), color=FORMAL_COLORS["gold"], linestyle="--", linewidth=2, label=f"Mediana: {values.median():.0f}")
 
         ax.set_title(_display_label(column), fontweight="bold")
         ax.set_xlabel(_display_label(column))
@@ -528,7 +387,7 @@ def plot_preliminary_outliers(data, numeric_cols=("Precio", "Año", "Kilómetros
                 labels=labels,
                 patch_artist=True,
                 boxprops=dict(facecolor=FORMAL_COLORS["light_gray"], color=FORMAL_COLORS["blue"]),
-                medianprops=dict(color=FORMAL_COLORS["red"], linewidth=2),
+                medianprops=dict(color=FORMAL_COLORS["red"], linewidth=2)
             )
 
             ax.set_xlabel("Moneda")
@@ -540,7 +399,7 @@ def plot_preliminary_outliers(data, numeric_cols=("Precio", "Año", "Kilómetros
                 values,
                 patch_artist=True,
                 boxprops=dict(facecolor=FORMAL_COLORS["light_gray"], color=FORMAL_COLORS["blue"]),
-                medianprops=dict(color=FORMAL_COLORS["red"], linewidth=2),
+                medianprops=dict(color=FORMAL_COLORS["red"], linewidth=2)
             )
 
         ax.set_title(_display_label(column), fontweight="bold")

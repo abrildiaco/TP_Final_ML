@@ -1,5 +1,6 @@
 # Proyecto Final ML - Orden de trabajo e ideas de graficos
 
+- PASAR A OTROS MUESTRAS CON < 20
 
 - Modelo/Version: Modelos/Version con menos de 10/20 publicaciones pasan a ser 'Other' asi el modelo no aprende rudio
   CONSIDERAR ELIMINAR VERSION -> VER CORRELACION CON EL PRECIO
@@ -8,8 +9,31 @@
   age = 2026 - Año.
   km_por_año = Kilómetros / Edad
   Marca_Modelo
+  log(kilometros)
+
+- CHEQUEAR SI LOS VALORES EN COLUMNAS COMO COLOR APORTAN RUIDOI.
+por ejemplo, vimos que los autos color gris son los mas caros, pero porque tal vez solo hay a la venta colores gris osucoro tope de gama --> RUIDO
 
 
+- CREAR es_premium
+premium = [
+    "bmw",
+    "audi",
+    "mercedes benz",
+    "volvo",
+    "land rover",
+    "lexus"
+]
+
+df["Marca premium"] = (
+    df["Marca"]
+    .isin(premium)
+    .astype(int)
+)
+
+- NO ELIMINAR TIUTLO Y DESCRIPCION
+
+- 
 
 # 4. Graficos avanzados despues de preparar features
 Objetivo: entender la estructura global del dataset.
