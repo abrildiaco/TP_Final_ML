@@ -403,7 +403,7 @@ def count_category_mentions_in_text(df, target_col, text_cols, category_map, ign
             "row_index": row_index,
             missing_col: missing_target_mask.loc[row_index],
             "matched_categories": " | ".join(sorted(set(mentions))),
-            "n_category_mentions": len(mentions),
+            "n_category_mentions": len(mentions)
         })
 
     return pd.DataFrame(rows)

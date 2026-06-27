@@ -469,6 +469,7 @@ def impute_missing_by_year(df, impute_col, year_threshold, year_col="Año", fill
     return data
 
 
+# REVISARRRRRR
 def impute_missing_by_group_consensus(df, target_col, group_cols, missing_values=("missing",),
                                       min_known_count=1, separator=" | ",
                                       return_audit=True):
@@ -476,10 +477,6 @@ def impute_missing_by_group_consensus(df, target_col, group_cols, missing_values
     Fills missing values in a target column using the consensus value observed
     in rows with the same group key. A missing value is imputed only when all
     known values inside that group agree, which avoids filling ambiguous groups.
-
-    For example, if every known row for the same Marca + Modelo has
-    "Con cámara de retroceso" equal to 1, missing rows for that Marca + Modelo
-    are filled with 1. If the group contains both 0 and 1, it is left unchanged.
 
     Arguments:
         df (pd.DataFrame): dataset to transform
@@ -585,26 +582,32 @@ def impute_missing_by_group_consensus(df, target_col, group_cols, missing_values
 
     return data
 
-
-def impute_backup_camera_by_brand_model(df, camera_col="Con cámara de retroceso",
-                                        brand_col="Marca", model_col="Modelo",
-                                        missing_values=("missing",),
-                                        min_known_count=1, return_audit=True):
+# REVISARRRR
+def impute_backup_camera_by_brand_model_year(
+    df,
+    camera_col="Con cámara de retroceso",
+    brand_col="Marca",
+    model_col="Modelo",
+    year_col="Año",
+    missing_values=("missing",),
+    min_known_count=1,
+    return_audit=True
+):
     """
     Fills missing backup-camera values using the consensus observed for the same
-    normalized Marca + Modelo pair.
+    normalized Marca + Modelo + Año group.
 
     Arguments:
         df (pd.DataFrame): dataset to transform
         camera_col (str): backup-camera binary column
         brand_col (str): brand column
         model_col (str): model column
+        year_col (str): year column
         missing_values (tuple[str]): string values treated as missing in addition
             to NaN
-        min_known_count (int): minimum known rows required for a Marca + Modelo
-            pair before imputing
-        return_audit (bool): whether to return the audit table alongside the
-            dataset
+        min_known_count (int): minimum known rows required for a Marca + Modelo + Año
+            group before imputing
+        return_audit (bool): whether to return the audit table alongside the dataset
 
     Returns:
         pd.DataFrame: imputed dataset if return_audit is False
@@ -614,7 +617,7 @@ def impute_backup_camera_by_brand_model(df, camera_col="Con cámara de retroceso
     return impute_missing_by_group_consensus(
         df,
         target_col=camera_col,
-        group_cols=(brand_col, model_col),
+        group_cols=(brand_col, model_col, year_col),
         missing_values=missing_values,
         min_known_count=min_known_count,
         return_audit=return_audit,
@@ -734,7 +737,7 @@ def fill_missing_from_single_text_match(df, target_col, matches_df, matched_col=
         "row_index",
         matched_col,
         "n_unique_matches",
-        "fill_value",
+        "fill_value"
     ]]
     audit_table["target_col"] = target_col
 

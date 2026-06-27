@@ -248,7 +248,7 @@ def plot_compact_value_counts(df, columns, top_n=10, n_cols=2):
     """
     n_rows = math.ceil(len(columns) / n_cols)
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 4 * n_rows))
+    _, axes = plt.subplots(n_rows, n_cols, figsize=(7 * n_cols, 4 * n_rows))
     axes = np.asarray(axes).flatten()
 
     bar_color = FORMAL_COLORS["teal"]
@@ -257,12 +257,7 @@ def plot_compact_value_counts(df, columns, top_n=10, n_cols=2):
         counts = df[column].value_counts(dropna=False).head(top_n)
         counts = counts.sort_values()
 
-        bars = ax.barh(
-            counts.index.astype(str),
-            counts.values,
-            color=bar_color,
-            alpha=0.9,
-        )
+        bars = ax.barh(counts.index.astype(str), counts.values, color=bar_color, alpha=0.9)
 
         max_value = counts.values.max()
         ax.set_xlim(0, max_value * 1.15)
@@ -270,14 +265,7 @@ def plot_compact_value_counts(df, columns, top_n=10, n_cols=2):
         # Add count labels with extra space to avoid overlap
         for bar in bars:
             width = bar.get_width()
-            ax.text(
-                width + max_value * 0.015,
-                bar.get_y() + bar.get_height() / 2,
-                f"{int(width)}",
-                va="center",
-                ha="left",
-                fontsize=9,
-            )
+            ax.text(width + max_value * 0.015, bar.get_y() + bar.get_height() / 2, f"{int(width)}", va="center", ha="left", fontsize=9)
 
         ax.set_title(_add_top_n_to_title(str(column), top_n, "categorías"), fontweight="bold", fontsize=12)
         ax.set_xlabel("Count")
