@@ -917,7 +917,7 @@ def plot_outliers_by_category(df, category_col, price_col="Precio",
     if n_splits == 1:
         axes = [axes]
 
-    for i, (ax, split_categories) in zip(axes, splits):
+    for i, (ax, split_categories) in enumerate(zip(axes, splits)):
         split_data = df_filtered[df_filtered[category_col].isin(split_categories)]
 
         sns.boxplot(
