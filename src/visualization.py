@@ -941,8 +941,6 @@ def plot_outliers_by_category(df, category_col, price_col="Precio",
     plt.tight_layout()
     plt.show()
 
-# ========================= Missingness Analysis =========================
-
 
 # ========================= Post-Preprocessing EDA =========================
 
@@ -1514,18 +1512,32 @@ def get_non_one_hot_binary_columns(data, target_col="Precio", one_hot_prefixes=N
 
 def plot_numeric_and_binary_correlation_heatmap(data, target_col="Precio",
                                                 one_hot_prefixes=None,
+                                                include_cols=None,
+                                                include_one_hot_prefixes=None,
+                                                top_n_one_hot=None,
+                                                min_one_hot_frequency=0.0,
+                                                max_one_hot_frequency=1.0,
                                                 include_log_target=True,
                                                 title="Correlación de variables numéricas y binarias no one-hot"):
     """
-    Plots a compact heatmap with numeric columns and non-one-hot binary columns.
+    Plots a compact heatmap with numeric columns and selected binary columns.
 
     This is useful after one-hot encoding when we want to keep engineered binary
     signals, such as turbo or backup camera, but avoid hundreds of dummy columns.
+    One-hot groups can be included explicitly when needed, for example Color.
 
     Arguments:
         data (pd.DataFrame): dataset including the target column
         target_col (str): target column name
-        one_hot_prefixes (list[str] | None): prefixes used by one-hot columns
+        one_hot_prefixes (list[str] | None): prefixes excluded from the default
+            non-one-hot binary selection
+        include_cols (list[str] | None): specific columns to add to the heatmap
+        include_one_hot_prefixes (list[str] | None): one-hot groups to add,
+            such as ["Color"] or ["Color_"]
+        top_n_one_hot (int | None): maximum number of most frequent one-hot
+            columns added per prefix
+        min_one_hot_frequency (float): minimum one-hot column mean required
+        max_one_hot_frequency (float): maximum one-hot column mean allowed
         include_log_target (bool): whether to include log target in the heatmap
         title (str): plot title
 
@@ -1546,7 +1558,41 @@ def plot_numeric_and_binary_correlation_heatmap(data, target_col="Precio",
         one_hot_prefixes=one_hot_prefixes,
     )
 
-    selected_cols = list(dict.fromkeys(numeric_cols + binary_cols))
+    include_cols = include_cols or []
+    explicit_cols = [
+        column for column in include_cols
+        if column in data.columns
+    ]
+
+    one_hot_cols = []
+
+    for prefix in include_one_hot_prefixes or []:
+        prefix_text = prefix if str(prefix).endswith("_") else f"{prefix}_"
+        prefix_cols = []
+
+        for column in data.columns:
+            if not column.startswith(prefix_text):
+                continue
+
+            values = pd.to_numeric(data[column], errors="coerce")
+            frequency = values.mean()
+
+            if pd.isna(frequency):
+                continue
+
+            if frequency < min_one_hot_frequency or frequency > max_one_hot_frequency:
+                continue
+
+            prefix_cols.append((column, frequency))
+
+        prefix_cols = sorted(prefix_cols, key=lambda item: item[1], reverse=True)
+
+        if top_n_one_hot is not None:
+            prefix_cols = prefix_cols[:top_n_one_hot]
+
+        one_hot_cols.extend([column for column, _ in prefix_cols])
+
+    selected_cols = list(dict.fromkeys(numeric_cols + binary_cols + explicit_cols + one_hot_cols))
 
     plot_numeric_correlation_heatmap(
         data,
