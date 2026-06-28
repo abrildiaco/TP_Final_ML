@@ -61,7 +61,7 @@ def impute_missing_knn(df, target_col, feature_cols, n_neighbors=5,
         "target_col": target_col,
         "was_missing": missing_mask,
         "imputed_value": imputed_values,
-        "was_filled": missing_mask,
+        "was_filled": missing_mask
     })
 
     audit_table = audit_table[audit_table["was_missing"]].reset_index(drop=True)

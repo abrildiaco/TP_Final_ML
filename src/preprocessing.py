@@ -3,7 +3,7 @@ import re  # For regex operations in engine feature extraction
 import numpy as np
 import pandas as pd
 
-from eda_utils import normalize_category_text, invert_category_map
+from eda_utils import _normalize_category_text, invert_category_map
 
 
 # =========================  Private Helpers  =========================
@@ -403,7 +403,7 @@ def apply_semantic_mapping(df, column, category_map):
     inverted_map = invert_category_map(category_map)
 
     # Normalize text before applying the manual mapping
-    normalized_column = data[column].apply(normalize_category_text)
+    normalized_column = data[column].apply(_normalize_category_text)
     data[column] = normalized_column.map(inverted_map).fillna(normalized_column)
 
     return data
@@ -461,17 +461,19 @@ def impute_missing_by_year(df, impute_col, year_threshold, year_col="Año", fill
     missing_mask = _build_missing_mask(data[impute_col])
     old_car_mask = pd.to_numeric(data[year_col], errors="coerce") < year_threshold
 
-    data.loc[missing_mask & old_car_mask, impute_col] = fill_value
+    fill_mask = missing_mask & old_car_mask
 
-    print(f"Filled {(missing_mask & old_car_mask).sum()} rows in '{impute_col}' "
-          f"with {fill_value} (older than {year_threshold})")
+    data.loc[fill_mask, impute_col] = fill_value
+
+    print(f"Missing rows in '{impute_col}': {missing_mask.sum()}")
+    print(f"Filled by year rule: {fill_mask.sum()}")
+    print(f"Still missing after year rule: {missing_mask.sum() - fill_mask.sum()}")
 
     return data
 
 
-# REVISARRRRRR
-def impute_missing_by_group_consensus(df, target_col, group_cols, missing_values=("missing",),
-                                      min_known_count=1, separator=" | ",
+def impute_missing_by_group_consensus(df, target_col, group_cols, missing_values=("missing"),
+                                      min_known_count=2, separator=" | ",
                                       return_audit=True):
     """
     Fills missing values in a target column using the consensus value observed
@@ -506,14 +508,14 @@ def impute_missing_by_group_consensus(df, target_col, group_cols, missing_values
     normalized_groups = pd.DataFrame(index=data.index)
 
     for column in group_cols:
-        normalized_groups[column] = data[column].apply(normalize_category_text)
+        normalized_groups[column] = data[column].apply(_normalize_category_text)
 
     group_missing_mask = pd.Series(False, index=data.index)
 
     for column in group_cols:
         group_missing_mask = group_missing_mask | _build_missing_mask(
             normalized_groups[column],
-            extra_missing=missing_values,
+            extra_missing=missing_values
         )
 
     target_missing_mask = _build_missing_mask(data[target_col], extra_missing=missing_values)
@@ -561,11 +563,11 @@ def impute_missing_by_group_consensus(df, target_col, group_cols, missing_values
         fill_values=fill_values,
         audit_data={
             "group_key": group_keys,
-            "n_known_group_values": n_known_values,
+            "n_known_group_values": n_known_values
         },
         missing_values=missing_values,
         log_label="group consensus",
-        return_audit=True,
+        return_audit=True
     )
 
     audit_table = audit_table[audit_table["was_filled"]].copy()
@@ -573,7 +575,7 @@ def impute_missing_by_group_consensus(df, target_col, group_cols, missing_values
         "row_index",
         "group_key",
         "n_known_group_values",
-        "fill_value",
+        "fill_value"
     ]]
     audit_table["target_col"] = target_col
 
@@ -581,47 +583,6 @@ def impute_missing_by_group_consensus(df, target_col, group_cols, missing_values
         return data, audit_table
 
     return data
-
-# REVISARRRR
-def impute_backup_camera_by_brand_model_year(
-    df,
-    camera_col="Con cámara de retroceso",
-    brand_col="Marca",
-    model_col="Modelo",
-    year_col="Año",
-    missing_values=("missing",),
-    min_known_count=1,
-    return_audit=True
-):
-    """
-    Fills missing backup-camera values using the consensus observed for the same
-    normalized Marca + Modelo + Año group.
-
-    Arguments:
-        df (pd.DataFrame): dataset to transform
-        camera_col (str): backup-camera binary column
-        brand_col (str): brand column
-        model_col (str): model column
-        year_col (str): year column
-        missing_values (tuple[str]): string values treated as missing in addition
-            to NaN
-        min_known_count (int): minimum known rows required for a Marca + Modelo + Año
-            group before imputing
-        return_audit (bool): whether to return the audit table alongside the dataset
-
-    Returns:
-        pd.DataFrame: imputed dataset if return_audit is False
-        tuple[pd.DataFrame, pd.DataFrame]: imputed dataset and audit table if
-            return_audit is True
-    """
-    return impute_missing_by_group_consensus(
-        df,
-        target_col=camera_col,
-        group_cols=(brand_col, model_col, year_col),
-        missing_values=missing_values,
-        min_known_count=min_known_count,
-        return_audit=return_audit,
-    )
 
 
 def add_missing_indicators_for_binary_columns(df, binary_cols=None, fill_value=0):
@@ -685,16 +646,16 @@ def fill_missing_from_text(df, target_col, text_cols, extractor,
     text_source = _concat_text_columns(df, text_cols)
     extracted_values = text_source.apply(extractor)
 
-    data, audit_table = _fill_missing_from_candidates( df, target_col=target_col, fill_values=extracted_values, 
+    data, audit_table = _fill_missing_from_candidates(df, target_col=target_col, fill_values=extracted_values, 
                                                       audit_data={"text_used": text_source, extracted_col_name: extracted_values}, 
-                                                      log_label="text", return_audit=True,)
+                                                      log_label="text", return_audit=True)
 
     audit_table = audit_table[[
         "row_index",
         "text_used",
         extracted_col_name,
         "was_missing",
-        "was_filled",
+        "was_filled"
     ]]
     audit_table = audit_table[audit_table["was_filled"]].reset_index(drop=True)
 
@@ -702,6 +663,7 @@ def fill_missing_from_text(df, target_col, text_cols, extractor,
         return data, audit_table
 
     return data
+
 
 def fill_missing_from_single_text_match(df, target_col, matches_df, matched_col="matched_categories",
                                         row_index_col="row_index", separator=" | ",
@@ -766,7 +728,7 @@ def add_text_indicator_features(df, text_cols, terms_map, prefix="", drop_text_c
         pd.DataFrame: dataset with the new binary text indicator features
     """
     data = df.copy()
-    text_source = _concat_text_columns(data, text_cols).apply(normalize_category_text)
+    text_source = _concat_text_columns(data, text_cols).apply(_normalize_category_text)
     any_match = pd.Series(False, index=data.index)
 
     for feature_name, variants in terms_map.items():
@@ -776,7 +738,7 @@ def add_text_indicator_features(df, text_cols, terms_map, prefix="", drop_text_c
         feature_values = pd.Series(False, index=data.index)
 
         for variant in variants:
-            variant_norm = normalize_category_text(variant)
+            variant_norm = _normalize_category_text(variant)
             pattern = r"\b" + re.escape(variant_norm) + r"\b"
             feature_values = feature_values | text_source.str.contains(pattern, regex=True, na=False)
 
@@ -830,7 +792,7 @@ def extract_engine_liters(value, require_engine_context=False, allow_start_numbe
     if pd.isna(value):
         return np.nan
 
-    text = normalize_category_text(value)
+    text = _normalize_category_text(value)
     text = text.replace(",", ".")
 
     if require_engine_context:
@@ -939,7 +901,7 @@ def has_turbo(value, turbo_patterns):
     if pd.isna(value):
         return 0
 
-    text = normalize_category_text(value)
+    text = _normalize_category_text(value)
     pattern = "|".join(turbo_patterns)
 
     return int(bool(re.search(pattern, text)))
@@ -963,7 +925,7 @@ def extract_backup_camera(value):
     if pd.isna(value):
         return np.nan
 
-    text = normalize_category_text(value)
+    text = _normalize_category_text(value)
 
     # Bidirectional patterns allow "camara trasera" and "trasera camara" to both match
     positive_patterns = [
@@ -1056,3 +1018,59 @@ def one_hot_encoding(df, categorical_cols=None, train=True, categories_map=None,
 
 
 # =========================  Feature Engeneering  =========================
+
+def group_rare_categories(df, categorical_cols, min_count=20, rare_label="otros", categories_map=None, train=True):
+    """
+    Groups infrequent categories into a common label.
+
+    Arguments:
+        df (pd.DataFrame): dataset to transform
+        categorical_cols (list[str]): categorical columns to process
+        min_count (int): minimum frequency required to keep a category
+        rare_label (str): label assigned to rare or unseen categories
+        categories_map (dict | None): frequent categories learned from train
+        train (bool): whether to learn frequent categories from df
+
+    Returns:
+        tuple[pd.DataFrame, dict] | pd.DataFrame: transformed dataset and learned map if train=True
+    """
+    data = df.copy()
+    categorical_cols = categorical_cols or []
+    rare_label = _normalize_category_text(rare_label)
+
+    for column in categorical_cols:
+        if column in data.columns:
+            data[column] = data[column].apply(_normalize_category_text)
+
+    if train:
+        categories_map = {}
+
+        for column in categorical_cols:
+            if column not in data.columns:
+                continue
+
+            counts = data[column].value_counts(dropna=False)
+            frequent_categories = counts[counts >= min_count].index.tolist()
+
+            # Keep the rare label if it already exists
+            if rare_label in data[column].values and rare_label not in frequent_categories:
+                frequent_categories.append(rare_label)
+
+            categories_map[column] = frequent_categories
+
+    if categories_map is None:
+        raise ValueError("categories_map must be provided when train=False.")
+
+    for column in categorical_cols:
+        if column not in data.columns:
+            continue
+
+        data[column] = data[column].where(
+            data[column].isin(categories_map[column]),
+            rare_label
+        )
+
+    if train:
+        return data, categories_map
+
+    return data

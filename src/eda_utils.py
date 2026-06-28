@@ -8,24 +8,6 @@ import pandas as pd
 
 # =========================  Private Helpers  =========================
 
-def display_table(df):
-    """
-    Displays a DataFrame in notebooks without showing the default pandas index.
-
-    Arguments:
-        df (pd.DataFrame): table to display
-
-    Returns:
-        None
-    """
-    try:
-        from IPython.display import display
-
-        display(df.style.hide(axis="index"))
-    except ImportError:
-        print(df.to_string(index=False))
-
-
 def _build_missing_mask(series, extra_missing=("missing",)):
     """
     Returns a boolean mask that is True wherever a Series value should be
@@ -43,6 +25,31 @@ def _build_missing_mask(series, extra_missing=("missing",)):
     """
     normalized = {v.strip().lower() for v in extra_missing}
     return series.isna() | series.astype(str).str.strip().str.lower().isin(normalized)
+
+
+def _normalize_category_text(value):
+    """
+    Normalizes categorical text to make similar values easier to compare.
+    Converts to lowercase, removes accents, and collapses irregular spacing
+    and separators so that variants like "Blanco", "blanca", and "blanco "
+    all map to the same string.
+
+    Arguments:
+        value (object): original category value
+
+    Returns:
+        str: normalized category value, or "missing" if the input is NaN
+    """
+    if pd.isna(value):
+        return "missing"
+
+    value = str(value).strip().lower()
+    value = unicodedata.normalize("NFKD", value)
+    value = "".join(char for char in value if not unicodedata.combining(char))
+    value = value.replace("_", " ").replace("-", " ")
+    value = " ".join(value.split())
+
+    return value
 
 
 # ========================= Target Analysis =========================
@@ -145,7 +152,7 @@ def missing_values_summary(df, missing_values=("missing",)):
         if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
             # Normalize text columns so placeholder strings are caught by _build_missing_mask
             series = series.apply(
-                lambda value: np.nan if pd.isna(value) else normalize_category_text(value)
+                lambda value: np.nan if pd.isna(value) else _normalize_category_text(value)
             )
 
         missing_count = _build_missing_mask(series, extra_missing=missing_values).sum()
@@ -209,30 +216,6 @@ def get_constant_columns(df):
 
 # ========================= Semantic Category Inspection =========================
 
-def normalize_category_text(value):
-    """
-    Normalizes categorical text to make similar values easier to compare.
-    Converts to lowercase, removes accents, and collapses irregular spacing
-    and separators so that variants like "Blanco", "blanca", and "blanco "
-    all map to the same string.
-
-    Arguments:
-        value (object): original category value
-
-    Returns:
-        str: normalized category value, or "missing" if the input is NaN
-    """
-    if pd.isna(value):
-        return "missing"
-
-    value = str(value).strip().lower()
-    value = unicodedata.normalize("NFKD", value)
-    value = "".join(char for char in value if not unicodedata.combining(char))
-    value = value.replace("_", " ").replace("-", " ")
-    value = " ".join(value.split())
-
-    return value
-
 
 def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
     """
@@ -254,7 +237,7 @@ def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
         categories = value_counts.index.tolist()
 
         normalized_values = {
-            category: normalize_category_text(category)
+            category: _normalize_category_text(category)
             for category in categories
         }
 
@@ -319,10 +302,10 @@ def invert_category_map(category_map):
     inverted_map = {}
 
     for final_value, variants in category_map.items():
-        final_value_norm = normalize_category_text(final_value)
+        final_value_norm = _normalize_category_text(final_value)
 
         for variant in variants:
-            variant_norm = normalize_category_text(variant)
+            variant_norm = _normalize_category_text(variant)
             inverted_map[variant_norm] = final_value_norm
 
     return inverted_map
@@ -350,10 +333,10 @@ def count_category_mentions_in_text(df, target_col, text_cols, category_map, ign
         pd.DataFrame: row-level table with matched categories and mention counts
     """
     variant_to_category = {}
-    ignored_normalized = {normalize_category_text(c) for c in ignored_categories}
+    ignored_normalized = {_normalize_category_text(c) for c in ignored_categories}
 
     for final_value, variants in category_map.items():
-        final_norm = normalize_category_text(final_value)
+        final_norm = _normalize_category_text(final_value)
 
         if final_norm in ignored_normalized:
             continue
@@ -361,7 +344,7 @@ def count_category_mentions_in_text(df, target_col, text_cols, category_map, ign
         variant_to_category[final_norm] = final_norm
 
         for variant in variants:
-            variant_norm = normalize_category_text(variant)
+            variant_norm = _normalize_category_text(variant)
             variant_to_category[variant_norm] = final_norm
 
     # Sort longer variants first so "marcha atras" is matched before "marcha"
@@ -385,7 +368,7 @@ def count_category_mentions_in_text(df, target_col, text_cols, category_map, ign
             if col in df.columns and not pd.isna(row[col])
         )
 
-        normalized_text = normalize_category_text(text)
+        normalized_text = _normalize_category_text(text)
 
         mentions = []
 
@@ -439,7 +422,7 @@ def frequent_words_table(df, text_cols, top_n=30, min_word_length=3, stop_words=
     if stop_words is None:
         stop_words = default_stop_words
     else:
-        stop_words = {normalize_category_text(word) for word in stop_words}
+        stop_words = {_normalize_category_text(word) for word in stop_words}
 
     text = " ".join(
         df[column].dropna().astype(str).str.cat(sep=" ")
@@ -447,7 +430,7 @@ def frequent_words_table(df, text_cols, top_n=30, min_word_length=3, stop_words=
         if column in df.columns
     )
 
-    normalized_text = normalize_category_text(text)
+    normalized_text = _normalize_category_text(text)
     words = re.findall(r"\b[a-z0-9]+\b", normalized_text)
 
     words = [
@@ -482,7 +465,7 @@ def count_interest_terms_in_text(df, text_cols, terms_map):
         if column in df.columns:
             text_source = text_source + " " + df[column].fillna("").astype(str)
 
-    normalized_text = text_source.apply(normalize_category_text)
+    normalized_text = text_source.apply(_normalize_category_text)
 
     rows = []
 
@@ -494,7 +477,7 @@ def count_interest_terms_in_text(df, text_cols, terms_map):
         matched_rows = pd.Series(False, index=df.index)
 
         for variant in variants:
-            variant_norm = normalize_category_text(variant)
+            variant_norm = _normalize_category_text(variant)
             pattern = r"\b" + re.escape(variant_norm) + r"\b"
 
             counts = normalized_text.str.count(pattern)
