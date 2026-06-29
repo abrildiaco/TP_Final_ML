@@ -2404,6 +2404,7 @@ def plot_iqr_ranking_by_category(data, category_col="Marca", price_col="Precio",
 
 
 # ========================= Modeling Graphics =========================
+
 def plot_regression_metrics(metrics_df, model_name="Linear Regression"):
     """ Plots train and validation metrics for a regression model """
     
@@ -2430,6 +2431,83 @@ def plot_regression_metrics(metrics_df, model_name="Linear Regression"):
         ax.set_title(metric_name, fontweight="bold")
         ax.set_ylabel(metric_name)
         ax.grid(axis="y", alpha=0.25)
+
+    plt.tight_layout(rect=(0, 0, 1, 0.94))
+    plt.show()
+
+
+def plot_regression_metrics_comparison(metrics_dict, title="Regression Metrics Comparison"):
+    """
+    Plots train and validation metrics for multiple versions of the same model.
+
+    Arguments:
+        metrics_dict (dict): dictionary where keys are model labels and values are metrics dataframes
+        title (str): general plot title
+
+    Returns:
+        None
+    """
+    metric_groups = {
+        "MSE": ("train_mse", "val_mse"),
+        "RMSE": ("train_rmse", "val_rmse"),
+        "MAE": ("train_mae", "val_mae"),
+        "R²": ("train_r2", "val_r2"),
+    }
+
+    colors = [
+        FORMAL_COLORS["blue"],
+        FORMAL_COLORS["teal"],
+        FORMAL_COLORS["gold"],
+        FORMAL_COLORS["red"],
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+    axes = axes.flatten()
+
+    fig.suptitle(title, fontsize=16, fontweight="bold")
+
+    model_names = list(metrics_dict.keys())
+    x_labels = ["Train", "Validation"]
+    x = np.arange(len(x_labels))
+    bar_width = 0.8 / len(model_names)
+
+    for ax, (metric_name, (train_col, val_col)) in zip(axes, metric_groups.items()):
+
+        for i, model_name in enumerate(model_names):
+            metrics_df = metrics_dict[model_name]
+
+            values = [
+                metrics_df[train_col].iloc[0],
+                metrics_df[val_col].iloc[0],
+            ]
+
+            offset = (i - (len(model_names) - 1) / 2) * bar_width
+
+            bars = ax.bar(
+                x + offset,
+                values,
+                width=bar_width,
+                label=model_name,
+                color=colors[i % len(colors)],
+                alpha=0.9,
+            )
+
+            for bar, value in zip(bars, values):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height(),
+                    f"{value:,.2f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                )
+
+        ax.set_title(metric_name, fontweight="bold")
+        ax.set_xticks(x)
+        ax.set_xticklabels(x_labels)
+        ax.set_ylabel(metric_name)
+        ax.grid(axis="y", alpha=0.25)
+        ax.legend()
 
     plt.tight_layout(rect=(0, 0, 1, 0.94))
     plt.show()
