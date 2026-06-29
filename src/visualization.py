@@ -2404,32 +2404,143 @@ def plot_iqr_ranking_by_category(data, category_col="Marca", price_col="Precio",
 
 
 # ========================= Modeling Graphics =========================
-def plot_regression_metrics(metrics_df, model_name="Linear Regression"):
-    """ Plots train and validation metrics for a regression model """
-    
+def plot_regression_metrics(metrics_df, model_name="Linear Regression", metrics=None,
+                            n_cols=2, label_col=None):
+    """
+    Plots selected train and validation metrics for a regression model.
+
+    Arguments:
+        metrics_df (pd.DataFrame): model metrics with train_* and val_* columns
+        model_name (str): model name shown in the figure title
+        metrics (list[str] | None): metrics to plot. Accepted values are
+            "mse", "rmse", "mae" and "r2". If None, all available metrics are
+            plotted
+        n_cols (int): number of subplot columns
+        label_col (str | None): column used to label rows when metrics_df has
+            more than one row. If None, common labels such as "model",
+            "segment" or "variant" are detected automatically
+
+    Returns:
+        None
+    """
     metric_groups = {
-        "MSE": ("train_mse", "val_mse", FORMAL_COLORS["blue"]),
-        "RMSE": ("train_rmse", "val_rmse", FORMAL_COLORS["teal"]),
-        "MAE": ("train_mae", "val_mae", FORMAL_COLORS["gold"]),
-        "R²": ("train_r2", "val_r2", FORMAL_COLORS["red"]),
+        "mse": ("MSE", "train_mse", "val_mse", FORMAL_COLORS["blue"]),
+        "rmse": ("RMSE", "train_rmse", "val_rmse", FORMAL_COLORS["teal"]),
+        "mae": ("MAE", "train_mae", "val_mae", FORMAL_COLORS["gold"]),
+        "r2": ("R²", "train_r2", "val_r2", FORMAL_COLORS["red"]),
     }
 
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8))
-    axes = axes.flatten()
+    if metrics is None:
+        selected_metrics = list(metric_groups.keys())
+    elif isinstance(metrics, str):
+        selected_metrics = [metrics.lower()]
+    else:
+        selected_metrics = [str(metric).lower() for metric in metrics]
 
-    fig.suptitle(f"{model_name} - Metrics", fontsize=16, fontweight="bold",)
+    invalid_metrics = [
+        metric for metric in selected_metrics
+        if metric not in metric_groups
+    ]
 
-    for ax, (metric_name, (train_col, val_col, color)) in zip(axes, metric_groups.items()):
-        values = [metrics_df[train_col].iloc[0], metrics_df[val_col].iloc[0]]
+    if invalid_metrics:
+        raise ValueError(f"Unknown metrics: {invalid_metrics}.")
 
-        bars = ax.bar(["Train", "Validation"], values, color=color, alpha=0.9)
+    selected_metrics = [
+        metric for metric in selected_metrics
+        if metric_groups[metric][1] in metrics_df.columns
+        and metric_groups[metric][2] in metrics_df.columns
+    ]
 
-        for bar, value in zip(bars, values):
-            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{value:,.2f}", ha="center", va="bottom", fontsize=9)
+    if not selected_metrics:
+        raise ValueError("No selected metrics are present in metrics_df.")
+
+    if label_col is None:
+        for candidate in ["model", "segment", "variant"]:
+            if candidate in metrics_df.columns:
+                label_col = candidate
+                break
+
+    if len(metrics_df) > 1 and label_col is None:
+        row_labels = [f"model_{index + 1}" for index in range(len(metrics_df))]
+    elif label_col is None:
+        row_labels = None
+    else:
+        row_labels = metrics_df[label_col].astype(str).tolist()
+
+    n_plots = len(selected_metrics)
+    n_cols = min(n_cols, n_plots)
+    n_rows = math.ceil(n_plots / n_cols)
+
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(5.5 * n_cols, 4 * n_rows),
+    )
+    axes = np.asarray(axes).reshape(-1)
+
+    fig.suptitle(f"{model_name} - Metrics", fontsize=16, fontweight="bold")
+
+    for ax, metric_key in zip(axes, selected_metrics):
+        metric_name, train_col, val_col, color = metric_groups[metric_key]
+
+        if len(metrics_df) == 1:
+            x_labels = ["Train", "Validation"]
+            values = [metrics_df[train_col].iloc[0], metrics_df[val_col].iloc[0]]
+            bars = ax.bar(x_labels, values, color=color, alpha=0.9)
+
+            for bar, value in zip(bars, values):
+                ax.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height(),
+                    f"{value:,.2f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=9,
+                )
+        else:
+            x = np.arange(len(metrics_df))
+            width = 0.36
+            train_values = metrics_df[train_col].values
+            val_values = metrics_df[val_col].values
+
+            train_bars = ax.bar(
+                x - width / 2,
+                train_values,
+                width=width,
+                color=color,
+                alpha=0.55,
+                label="Train",
+            )
+            val_bars = ax.bar(
+                x + width / 2,
+                val_values,
+                width=width,
+                color=color,
+                alpha=0.95,
+                label="Validation",
+            )
+
+            ax.set_xticks(x)
+            ax.set_xticklabels(row_labels, rotation=20, ha="right")
+            ax.legend()
+
+            for bars, values in [(train_bars, train_values), (val_bars, val_values)]:
+                for bar, value in zip(bars, values):
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2,
+                        bar.get_height(),
+                        f"{value:,.2f}",
+                        ha="center",
+                        va="bottom",
+                        fontsize=8,
+                    )
 
         ax.set_title(metric_name, fontweight="bold")
         ax.set_ylabel(metric_name)
         ax.grid(axis="y", alpha=0.25)
+
+    for ax in axes[n_plots:]:
+        ax.axis("off")
 
     plt.tight_layout(rect=(0, 0, 1, 0.94))
     plt.show()

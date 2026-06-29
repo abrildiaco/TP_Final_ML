@@ -164,8 +164,13 @@ def missing_values_summary(df, missing_values=("missing",)):
                 "missing_percentage": round(missing_count / len(df) * 100, 2) if len(df) else np.nan
             })
 
+    output_columns = ["column", "missing_count", "missing_percentage"]
+
+    if not rows:
+        return pd.DataFrame(columns=output_columns)
+
     return (
-        pd.DataFrame(rows)
+        pd.DataFrame(rows, columns=output_columns)
         .sort_values("missing_percentage", ascending=False)
         .reset_index(drop=True)
     )
