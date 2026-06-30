@@ -293,7 +293,12 @@ def plot_compact_value_counts(df, columns, top_n=10, n_cols=2):
         counts = df[column].value_counts(dropna=False).head(top_n)
         counts = counts.sort_values()
 
-        bars = ax.barh(counts.index.astype(str), counts.values, color=bar_color, alpha=0.9)
+        labels = ["Missing" if pd.isna(value) else str(value) for value in counts.index]
+        y_positions = np.arange(len(labels))
+
+        bars = ax.barh(y_positions, counts.values, color=bar_color, alpha=0.9)
+        ax.set_yticks(y_positions)
+        ax.set_yticklabels(labels)
 
         max_value = counts.values.max()
         ax.set_xlim(0, max_value * 1.15)

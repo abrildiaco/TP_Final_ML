@@ -7,13 +7,13 @@ from sklearn.model_selection import KFold, train_test_split
 from sklearn.pipeline import Pipeline
 from xgboost import XGBRegressor
 
-import feature_engeneering as fe
+import src.feature_engineering as fe
 import preprocessing as prep
+import constants as const
 
 
 RANDOM_STATE = 42
 TARGET = "Precio"
-
 BASE_CATEGORICAL_COLS = [
     "Marca",
     "Modelo",
@@ -23,58 +23,12 @@ BASE_CATEGORICAL_COLS = [
     "Tipo de combustible",
     "Transmisión",
 ]
-
 TEXT_COLS_TO_DROP = ["Título", "Descripción", "Versión"]
 BINARY_MISSING_COLS = ["Con cámara de retroceso"]
-
-XGB_BASE_PARAMS = {
-    "n_estimators": 350,
-    "learning_rate": 0.045,
-    "max_depth": 5,
-    "min_child_weight": 3,
-    "subsample": 0.85,
-    "colsample_bytree": 0.85,
-    "reg_alpha": 0.05,
-    "reg_lambda": 2.0,
-    "random_state": RANDOM_STATE,
-    "n_jobs": -1,
-}
-
-XGB_REGULARIZED_PARAMS = {
-    "n_estimators": 550,
-    "learning_rate": 0.035,
-    "max_depth": 6,
-    "min_child_weight": 4,
-    "subsample": 0.85,
-    "colsample_bytree": 0.80,
-    "reg_alpha": 0.10,
-    "reg_lambda": 3.0,
-    "random_state": RANDOM_STATE,
-    "n_jobs": -1,
-}
-
-EXPERIMENT_METRIC_FORMAT = {
-    "val_rmse": "{:,.2f}",
-    "val_mae": "{:,.2f}",
-    "val_r2": "{:.4f}",
-    "train_rmse": "{:,.2f}",
-    "train_mae": "{:,.2f}",
-    "train_r2": "{:.4f}",
-}
-
-EXPERIMENT_DISPLAY_COLS = [
-    "experiment",
-    "params",
-    "dropped_cols",
-    "rare_min_count",
-    "n_features",
-    "val_rmse",
-    "val_mae",
-    "val_r2",
-    "train_rmse",
-    "train_mae",
-    "train_r2",
-]
+XGB_BASE_PARAMS = const.XGB_BASE_PARAMS
+XGB_REGULARIZED_PARAMS = const.XGB_REGULARIZED_PARAMS
+EXPERIMENT_METRIC_FORMAT = const.EXPERIMENT_METRIC_FORMAT
+EXPERIMENT_DISPLAY_COLS = const.EXPERIMENT_DISPLAY_COLS
 
 
 def deduplicate_dataset(data):
@@ -197,6 +151,9 @@ def _prepare_base_features(X_train, X_val, feature_blocks=None, drop_cols=None,
         X_train,
         X_val,
         feature_blocks=feature_blocks or [],
+        reference_year=2025,
+        zero_km_threshold=100,
+        premium_brands=const.PREMIUM_BRANDS,
         brand_model_min_count=brand_model_min_count,
     )
 

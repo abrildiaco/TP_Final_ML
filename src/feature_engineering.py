@@ -7,73 +7,6 @@ from eda_utils import _normalize_category_text
 import preprocessing as prep
 
 
-DEFAULT_REFERENCE_YEAR = 2025
-DEFAULT_ZERO_KM_THRESHOLD = 100
-DEFAULT_PREMIUM_BRANDS = [
-    "alfa romeo",
-    "audi",
-    "bmw",
-    "land rover",
-    "mercedes benz",
-    "porsche",
-    "volvo",
-]
-DEFAULT_COLUMNS_TO_DROP = [
-    "Título",
-    "Descripción",
-    "Versión",
-]
-DEFAULT_CATEGORICAL_COLS = [
-    "Marca",
-    "Modelo",
-    "Marca_Modelo",
-    "Color",
-    "Tipo de vendedor",
-    "Tipo de combustible",
-    "Transmisión",
-]
-DEFAULT_BINARY_MISSING_COLS = [
-    "Con cámara de retroceso",
-]
-ALL_FEATURE_BLOCKS = [
-    "usage",
-    "brand_model",
-    "premium",
-    "cilindrada_missing",
-]
-DEFAULT_FEATURE_VARIANTS = [
-    {
-        "name": "baseline",
-        "feature_blocks": [],
-    },
-    {
-        "name": "usage",
-        "feature_blocks": ["usage"],
-    },
-    {
-        "name": "brand_model",
-        "feature_blocks": ["brand_model"],
-    },
-    {
-        "name": "premium_brand",
-        "feature_blocks": ["premium"],
-    },
-    {
-        "name": "cilindrada_missing",
-        "feature_blocks": ["cilindrada_missing"],
-    },
-    {
-        "name": "all_features",
-        "feature_blocks": "all",
-    },
-    {
-        "name": "all_features_without_brand_model_originals",
-        "feature_blocks": "all",
-        "drop_cols": ["Marca", "Modelo"],
-    },
-]
-
-
 # ======================== Versión ======================================
 def matches_any_pattern(value, patterns):
     """
@@ -261,9 +194,8 @@ def add_text_pattern_features_to_split(train_df, val_df, source_col,
 
 # ======================== Initial Feature Engineering ========================
 
-def add_usage_features(df, year_col="Año", km_col="Kilómetros",
-                       reference_year=DEFAULT_REFERENCE_YEAR,
-                       zero_km_threshold=DEFAULT_ZERO_KM_THRESHOLD):
+def add_usage_features(df, reference_year, zero_km_threshold,
+                       year_col="Año", km_col="Kilómetros"):
     """
     Adds vehicle age, kilometers-per-year and zero-kilometer indicators.
 
@@ -325,8 +257,7 @@ def add_brand_model_feature(train_df, val_df, brand_col="Marca", model_col="Mode
     return train_data, val_data
 
 
-def add_premium_brand_feature(df, premium_brands=DEFAULT_PREMIUM_BRANDS,
-                              brand_col="Marca"):
+def add_premium_brand_feature(df, premium_brands, brand_col="Marca"):
     """
     Adds a binary indicator for premium or high-end brands.
 
@@ -377,9 +308,8 @@ def add_cilindrada_missing_indicator(train_df, val_df,
     return train_data, val_data
 
 
-def add_initial_features(train_df, val_df, reference_year=DEFAULT_REFERENCE_YEAR,
-                         zero_km_threshold=DEFAULT_ZERO_KM_THRESHOLD,
-                         premium_brands=DEFAULT_PREMIUM_BRANDS,
+def add_initial_features(train_df, val_df, reference_year,
+                         zero_km_threshold, premium_brands,
                          brand_model_min_count=20):
     """
     Adds the first feature-engineering candidates used in the project.
@@ -428,7 +358,7 @@ def add_initial_features(train_df, val_df, reference_year=DEFAULT_REFERENCE_YEAR
 
 # ======================== Feature Variant Evaluation ========================
 
-def resolve_feature_blocks(feature_blocks):
+def resolve_feature_blocks(feature_blocks, available_blocks=None):
     """
     Normalizes the list of feature blocks requested for a model variant.
 
@@ -439,18 +369,25 @@ def resolve_feature_blocks(feature_blocks):
     Returns:
         list[str]: normalized feature block names
     """
+    available_blocks = available_blocks or [
+        "usage",
+        "brand_model",
+        "premium",
+        "cilindrada_missing",
+    ]
+
     if feature_blocks is None:
         return []
 
     if feature_blocks == "all":
-        return ALL_FEATURE_BLOCKS.copy()
+        return available_blocks.copy()
 
     if isinstance(feature_blocks, str):
         feature_blocks = [feature_blocks]
 
     invalid_blocks = [
         block for block in feature_blocks
-        if block not in ALL_FEATURE_BLOCKS
+        if block not in available_blocks
     ]
 
     if invalid_blocks:
@@ -460,9 +397,9 @@ def resolve_feature_blocks(feature_blocks):
 
 
 def add_selected_features(train_df, val_df, feature_blocks=None,
-                          reference_year=DEFAULT_REFERENCE_YEAR,
-                          zero_km_threshold=DEFAULT_ZERO_KM_THRESHOLD,
-                          premium_brands=DEFAULT_PREMIUM_BRANDS,
+                          reference_year=None,
+                          zero_km_threshold=None,
+                          premium_brands=None,
                           brand_model_min_count=20):
     """
     Adds only the feature-engineering blocks requested for one experiment.
@@ -488,6 +425,9 @@ def add_selected_features(train_df, val_df, feature_blocks=None,
     val_data = val_df.copy()
 
     if "usage" in blocks:
+        if reference_year is None or zero_km_threshold is None:
+            raise ValueError("reference_year and zero_km_threshold are required for the 'usage' feature block.")
+
         train_data = add_usage_features(
             train_data,
             reference_year=reference_year,
@@ -507,6 +447,9 @@ def add_selected_features(train_df, val_df, feature_blocks=None,
         )
 
     if "premium" in blocks:
+        if premium_brands is None:
+            raise ValueError("premium_brands is required for the 'premium' feature block.")
+
         train_data = add_premium_brand_feature(
             train_data,
             premium_brands=premium_brands,
@@ -528,9 +471,9 @@ def add_selected_features(train_df, val_df, feature_blocks=None,
 def build_feature_variant(train_df, val_df, feature_blocks=None, drop_cols=None,
                           columns_to_drop=None, categorical_cols=None,
                           binary_missing_cols=None,
-                          reference_year=DEFAULT_REFERENCE_YEAR,
-                          zero_km_threshold=DEFAULT_ZERO_KM_THRESHOLD,
-                          premium_brands=DEFAULT_PREMIUM_BRANDS,
+                          reference_year=None,
+                          zero_km_threshold=None,
+                          premium_brands=None,
                           brand_model_min_count=20):
     """
     Builds an encoded train/validation pair for one feature variant.
@@ -564,10 +507,19 @@ def build_feature_variant(train_df, val_df, feature_blocks=None, drop_cols=None,
         brand_model_min_count=brand_model_min_count,
     )
 
-    columns_to_drop = list(columns_to_drop or DEFAULT_COLUMNS_TO_DROP)
+    if columns_to_drop is None:
+        raise ValueError("columns_to_drop must be provided by the notebook.")
+
+    if categorical_cols is None:
+        raise ValueError("categorical_cols must be provided by the notebook.")
+
+    if binary_missing_cols is None:
+        raise ValueError("binary_missing_cols must be provided by the notebook.")
+
+    columns_to_drop = list(columns_to_drop)
     columns_to_drop = columns_to_drop + list(drop_cols or [])
-    categorical_cols = list(categorical_cols or DEFAULT_CATEGORICAL_COLS)
-    binary_missing_cols = list(binary_missing_cols or DEFAULT_BINARY_MISSING_COLS)
+    categorical_cols = list(categorical_cols)
+    binary_missing_cols = list(binary_missing_cols)
 
     train_features = prep.drop_irrelevant_columns(train_features, columns_to_drop)
     val_features = prep.drop_irrelevant_columns(val_features, columns_to_drop)
