@@ -374,13 +374,17 @@ def resolve_feature_blocks(feature_blocks, available_blocks=None):
         "brand_model",
         "premium",
         "cilindrada_missing",
+        "version",
     ]
 
     if feature_blocks is None:
         return []
 
     if feature_blocks == "all":
-        return available_blocks.copy()
+        return [
+            block for block in available_blocks
+            if block != "version"
+        ]
 
     if isinstance(feature_blocks, str):
         feature_blocks = [feature_blocks]
@@ -400,7 +404,11 @@ def add_selected_features(train_df, val_df, feature_blocks=None,
                           reference_year=None,
                           zero_km_threshold=None,
                           premium_brands=None,
-                          brand_model_min_count=20):
+                          brand_model_min_count=20,
+                          version_tier_patterns=None,
+                          version_binary_patterns=None,
+                          version_default_tier=1,
+                          version_source_col="Versión"):
     """
     Adds only the feature-engineering blocks requested for one experiment.
 
@@ -408,13 +416,21 @@ def add_selected_features(train_df, val_df, feature_blocks=None,
         train_df (pd.DataFrame): training dataset
         val_df (pd.DataFrame): validation dataset
         feature_blocks (str | list[str] | None): blocks to add. Available blocks
-            are "usage", "brand_model", "premium" and "cilindrada_missing".
-            Use "all" to include every block
+            are "usage", "brand_model", "premium", "cilindrada_missing" and
+            "version". Use "all" to include every block except "version",
+            which must be requested explicitly because it depends on project
+            pattern dictionaries
         reference_year (int): year used to compute vehicle age
         zero_km_threshold (int | float): maximum kilometers considered as 0km
         premium_brands (list[str]): brand names treated as high-end
         brand_model_min_count (int): minimum train frequency required to keep a
             brand-model combination
+        version_tier_patterns (dict[int, list[str]] | None): version-tier regex
+            patterns used when the "version" block is selected
+        version_binary_patterns (dict[str, list[str]] | None): binary version
+            regex patterns used when the "version" block is selected
+        version_default_tier (int): tier assigned when no version pattern matches
+        version_source_col (str): text column used to extract version features
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: train and validation datasets with
@@ -465,6 +481,21 @@ def add_selected_features(train_df, val_df, feature_blocks=None,
             val_data,
         )
 
+    if "version" in blocks:
+        if version_tier_patterns is None:
+            raise ValueError("version_tier_patterns is required for the 'version' feature block.")
+
+        train_data, val_data = add_text_pattern_features_to_split(
+            train_data,
+            val_data,
+            source_col=version_source_col,
+            tier_patterns=version_tier_patterns,
+            binary_patterns=version_binary_patterns,
+            prefix="Version",
+            default_tier=version_default_tier,
+            drop_source_col=False,
+        )
+
     return train_data, val_data
 
 
@@ -474,7 +505,11 @@ def build_feature_variant(train_df, val_df, feature_blocks=None, drop_cols=None,
                           reference_year=None,
                           zero_km_threshold=None,
                           premium_brands=None,
-                          brand_model_min_count=20):
+                          brand_model_min_count=20,
+                          version_tier_patterns=None,
+                          version_binary_patterns=None,
+                          version_default_tier=1,
+                          version_source_col="Versión"):
     """
     Builds an encoded train/validation pair for one feature variant.
 
@@ -492,6 +527,12 @@ def build_feature_variant(train_df, val_df, feature_blocks=None, drop_cols=None,
         premium_brands (list[str]): brand names treated as high-end
         brand_model_min_count (int): minimum train frequency required to keep a
             brand-model combination
+        version_tier_patterns (dict[int, list[str]] | None): version-tier regex
+            patterns used when the "version" block is selected
+        version_binary_patterns (dict[str, list[str]] | None): binary version
+            regex patterns used when the "version" block is selected
+        version_default_tier (int): tier assigned when no version pattern matches
+        version_source_col (str): text column used to extract version features
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame, dict]: encoded train, encoded
@@ -505,6 +546,10 @@ def build_feature_variant(train_df, val_df, feature_blocks=None, drop_cols=None,
         zero_km_threshold=zero_km_threshold,
         premium_brands=premium_brands,
         brand_model_min_count=brand_model_min_count,
+        version_tier_patterns=version_tier_patterns,
+        version_binary_patterns=version_binary_patterns,
+        version_default_tier=version_default_tier,
+        version_source_col=version_source_col,
     )
 
     if columns_to_drop is None:

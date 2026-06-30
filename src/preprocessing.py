@@ -354,7 +354,8 @@ def convert_peso_prices_to_usd(df, exchange_rate, price_col="Precio", currency_c
     data[price_col] = pd.to_numeric(data[price_col], errors="coerce")
     data.loc[peso_mask, price_col] = data.loc[peso_mask, price_col] / exchange_rate
 
-    return data.drop(columns=[currency_col])
+    data = data.drop(columns=[currency_col])
+    return data
 
 
 # =========================  Numeric Text Extraction  =========================
