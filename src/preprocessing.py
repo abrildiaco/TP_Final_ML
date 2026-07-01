@@ -3,8 +3,8 @@ import re  # For regex operations in engine feature extraction
 import numpy as np
 import pandas as pd
 
-from eda_utils import _normalize_category_text, invert_category_map
-
+import constants as const
+from eda_utils import _normalize_category_text, invert_category_map, count_category_mentions_in_text
 
 # =========================  Private Helpers  =========================
 
@@ -196,23 +196,6 @@ def drop_irrelevant_columns(df, columns_to_drop):
     """
     data = df.copy()
     return data.drop(columns=columns_to_drop, errors="ignore")
-
-
-def drop_rows_with_missing_values(df, column):
-    """
-    Removes rows where a specific column has a missing value, including
-    real NaN and the placeholder string "missing".
-
-    Arguments:
-        df (pd.DataFrame): dataset to transform
-        column (str): column used to identify missing rows
-
-    Returns:
-        pd.DataFrame: dataset without rows that have missing values in that column
-    """
-    data = df.copy()
-
-    return data.loc[~_build_missing_mask(data[column])].reset_index(drop=True)
 
 
 # =========================  Value Filtering  =========================
@@ -1075,3 +1058,258 @@ def group_rare_categories(df, categorical_cols, min_count=20, rare_label="otros"
         return data, categories_map
 
     return data
+
+
+# ========================= Preprocessing Pipelines =========================
+
+def preprocess_features(df, exchange_rate=None, text_cols=("Título", "Descripción", "Versión"), semantic_category_maps=None, camera_year_threshold=2000, fill_missing_value="missing"):
+    """
+    Applies deterministic preprocessing steps that can be reused in dev and test.
+
+    Arguments:
+        df (pd.DataFrame): raw vehicle dataset
+        exchange_rate (float | None): exchange rate used when Precio and Moneda exist
+        text_cols (tuple[str]): text columns used for text-based extraction
+        semantic_category_maps (dict | None): semantic maps for categorical cleaning
+        camera_year_threshold (int): year threshold used to impute missing backup camera
+        fill_missing_value (str): placeholder for remaining categorical missing values
+
+    Returns:
+        pd.DataFrame: preprocessed dataset before row filtering and encoding
+    """
+    data = df.copy()
+    semantic_category_maps = semantic_category_maps or const.SEMANTIC_CATEGORY_MAPS
+
+    data = drop_irrelevant_columns(data, columns_to_drop=["Unnamed: 0", "Tipo de carrocería"])
+
+    if exchange_rate is not None and {"Precio", "Moneda"}.issubset(data.columns):
+        data = convert_peso_prices_to_usd(data, exchange_rate=exchange_rate)
+    
+    elif "Moneda" in data.columns:
+        data = data.drop(columns=["Moneda"])
+
+    if "Kilómetros" in data.columns:
+        data["Kilómetros"] = data["Kilómetros"].apply(extract_first_integer)
+
+    for column, category_map in semantic_category_maps.items():
+        if column in data.columns:
+            data = apply_semantic_mapping(data, column=column, category_map=category_map)
+
+    if "Con cámara de retroceso" in data.columns:
+        camera_value_map = {"sí": 1, "si": 1, "no": 0, "missing": "missing", "nan": "missing"}
+        data = map_column_values(data, column="Con cámara de retroceso", value_map=camera_value_map)
+
+    available_text_cols = [column for column in text_cols if column in data.columns]
+
+    if available_text_cols and "Color" in data.columns:
+        color_mentions = count_category_mentions_in_text(data, target_col="Color", text_cols=available_text_cols, category_map=const.COLOR_MAP, only_missing_target=True, only_rows_with_mentions=True)
+        if not color_mentions.empty:
+            data, _ = fill_missing_from_single_text_match(data, target_col="Color", matches_df=color_mentions)
+
+    if available_text_cols and "Motor" in data.columns:
+        data, _ = fill_missing_from_text(data, target_col="Motor", text_cols=available_text_cols, extractor=extract_engine_liters_from_text)
+
+    if available_text_cols and "Transmisión" in data.columns:
+        transmission_mentions = count_category_mentions_in_text(data, target_col="Transmisión", text_cols=available_text_cols, category_map=const.TRANSMISSION_TEXT_MAP, only_missing_target=True, only_rows_with_mentions=True)
+        if not transmission_mentions.empty:
+            data, _ = fill_missing_from_single_text_match(data, target_col="Transmisión", matches_df=transmission_mentions)
+
+    if available_text_cols and "Con cámara de retroceso" in data.columns:
+        data, _ = fill_missing_from_text(data, target_col="Con cámara de retroceso", text_cols=available_text_cols, extractor=extract_backup_camera)
+        camera_group_cols = [column for column in ["Marca", "Modelo", "Año", "Versión"] if column in data.columns]
+
+        if camera_group_cols:
+            data, _ = impute_missing_by_group_consensus(data, target_col="Con cámara de retroceso", group_cols=camera_group_cols)
+
+        if "Año" in data.columns:
+            data = impute_missing_by_year(data, impute_col="Con cámara de retroceso", year_threshold=camera_year_threshold)
+
+    if "Motor" in data.columns:
+        data["Cilindrada"] = data["Motor"].apply(extract_engine_liters)
+
+        for source_col in ["Versión", "Descripción", "Título"]:
+            if source_col in data.columns:
+                missing_engine_mask = data["Cilindrada"].isna()
+                data.loc[missing_engine_mask, "Cilindrada"] = data.loc[missing_engine_mask, source_col].apply(extract_engine_liters)
+
+        turbo_text_cols = [column for column in ["Motor", "Versión", "Título", "Descripción"] if column in data.columns]
+        turbo_text = _concat_text_columns(data, turbo_text_cols)
+        data["Tiene turbo"] = turbo_text.apply(lambda value: has_turbo(value, turbo_patterns=const.TURBO_PATTERNS))
+        data = drop_irrelevant_columns(data, columns_to_drop=["Motor"])
+
+    if available_text_cols:
+        data = add_text_indicator_features(data, text_cols=available_text_cols, terms_map=const.INTEREST_TERMS, add_no_match_feature=True, no_match_feature_name="sin_condicion")
+
+    data = fill_missing_with_value(data, value=fill_missing_value)
+
+    return data
+
+
+def fit_feature_encoding(train_df, categorical_cols, binary_missing_cols=None, rare_min_count=20, rare_label="otros"):
+    """
+    Learns rare-category grouping and one-hot categories from the development set.
+
+    Arguments:
+        train_df (pd.DataFrame): preprocessed development features
+        categorical_cols (list[str]): categorical columns to group and encode
+        binary_missing_cols (list[str] | None): binary columns with missing indicators
+        rare_min_count (int): minimum count required to keep a category
+        rare_label (str): label assigned to rare categories
+
+    Returns:
+        tuple[pd.DataFrame, dict]: encoded features and fitted artifacts
+    """
+    binary_missing_cols = binary_missing_cols or []
+
+    train_grouped, rare_categories_map = group_rare_categories(train_df, categorical_cols=categorical_cols, min_count=rare_min_count, rare_label=rare_label, train=True)
+    train_encoded, one_hot_categories_map = one_hot_encoding(train_grouped, categorical_cols=categorical_cols, train=True, binary_missing_cols=binary_missing_cols)
+
+    artifacts = {
+        "rare_categories_map": rare_categories_map,
+        "one_hot_categories_map": one_hot_categories_map,
+        "train_columns": train_encoded.columns.tolist(),
+        "categorical_cols": categorical_cols,
+        "binary_missing_cols": binary_missing_cols,
+        "rare_min_count": rare_min_count,
+        "rare_label": rare_label,
+    }
+
+    return train_encoded, artifacts
+
+
+def encode_features(test_df, artifacts):
+    """
+    Applies fitted rare-category grouping and one-hot encoding to test data.
+
+    Arguments:
+        test_df (pd.DataFrame): preprocessed test features
+        artifacts (dict): fitted artifacts returned by fit_feature_encoding
+
+    Returns:
+        pd.DataFrame: encoded test features aligned to development columns
+    """
+    categorical_cols = artifacts["categorical_cols"]
+    binary_missing_cols = artifacts.get("binary_missing_cols", [])
+    rare_label = artifacts.get("rare_label", "otros")
+
+    test_grouped = group_rare_categories(test_df, categorical_cols=categorical_cols, categories_map=artifacts["rare_categories_map"], rare_label=rare_label, train=False)
+    test_encoded = one_hot_encoding(test_grouped, categorical_cols=categorical_cols, train=False, categories_map=artifacts["one_hot_categories_map"], binary_missing_cols=binary_missing_cols)
+    test_encoded = test_encoded.reindex(columns=artifacts["train_columns"], fill_value=0)
+
+    return test_encoded
+
+
+def process_dev_dataset(dev_df, exchange_rate, target_col="Precio", text_cols=("Título", "Descripción", "Versión"), columns_to_drop=("Título", "Descripción", "Versión"), categorical_cols=None, binary_missing_cols=("Con cámara de retroceso",), invalid_value_rules=None, outlier_rules=None, premium_brands=None, non_premium_price_bounds=(1000, 150000), rare_min_count=20, rare_label="otros", drop_duplicates=True):
+    """
+    Processes the full development dataset used for final training.
+
+    This function works with the complete development dataset. It does not split
+    into train and validation. Since this dataset is used to fit the final model,
+    it can remove invalid rows, drop duplicates and learn encoding artifacts.
+
+    Arguments:
+        dev_df (pd.DataFrame): raw development dataset including target
+        exchange_rate (float): exchange rate used to convert peso prices to USD
+        target_col (str): target column name
+        text_cols (tuple[str]): text columns used for text-based extraction
+        columns_to_drop (tuple[str]): columns removed before modeling
+        categorical_cols (list[str] | None): categorical columns to group and encode
+        binary_missing_cols (tuple[str]): binary columns with missing indicators
+        invalid_value_rules (dict | None): hard validity rules
+        outlier_rules (dict | None): outlier filtering rules
+        premium_brands (list[str] | None): brands allowed to keep higher prices
+        non_premium_price_bounds (tuple[int, int] | None): price clipping bounds for non-premium brands
+        rare_min_count (int): minimum count required to keep a category
+        rare_label (str): label assigned to rare categories
+        drop_duplicates (bool): whether to remove exact duplicate rows
+
+    Returns:
+        dict: processed dataset, model features, target, encoded features, artifacts and summary
+    """
+    if categorical_cols is None:
+        categorical_cols = ["Marca", "Modelo", "Color", "Tipo de vendedor", "Tipo de combustible", "Transmisión"]
+
+    if invalid_value_rules is None:
+        invalid_value_rules = {"Año": {"max": 2025}, "Puertas": {"max": 5}}
+
+    if outlier_rules is None:
+        outlier_rules = {"Precio": {"method": "fixed", "min": 1000, "max": 400000}, "Kilómetros": {"method": "fixed", "min": 0, "max": 600000}}
+
+    if premium_brands is None:
+        premium_brands = const.PREMIUM_BRANDS
+
+    summary_rows = []
+    data = dev_df.copy()
+    summary_rows.append({"step": "raw_dataset", "rows": len(data)})
+
+    data = preprocess_features(data, exchange_rate=exchange_rate, text_cols=text_cols)
+    summary_rows.append({"step": "after_preprocessing", "rows": len(data)})
+
+    available_invalid_rules = {column: rule for column, rule in invalid_value_rules.items() if column in data.columns}
+    if available_invalid_rules:
+        data = remove_invalid_values(data, available_invalid_rules)
+    summary_rows.append({"step": "after_invalid_filtering", "rows": len(data)})
+
+    data = detect_outliers(data, outlier_rules, mode="drop")
+    summary_rows.append({"step": "after_outlier_filtering", "rows": len(data)})
+
+    if non_premium_price_bounds is not None and {"Marca", target_col}.issubset(data.columns):
+        lower_price, upper_price = non_premium_price_bounds
+        non_premium_mask = ~data["Marca"].isin(premium_brands)
+        data.loc[non_premium_mask, target_col] = data.loc[non_premium_mask, target_col].clip(lower=lower_price, upper=upper_price)
+    summary_rows.append({"step": "after_non_premium_price_clipping", "rows": len(data)})
+
+    if drop_duplicates:
+        data = data.drop_duplicates().reset_index(drop=True)
+    summary_rows.append({"step": "after_duplicate_removal", "rows": len(data)})
+
+    if target_col not in data.columns:
+        raise ValueError(f"Target column '{target_col}' was not found after preprocessing.")
+
+    y = pd.to_numeric(data[target_col], errors="coerce")
+    valid_target_mask = y.notna()
+
+    data = data.loc[valid_target_mask].reset_index(drop=True)
+    y = y.loc[valid_target_mask].reset_index(drop=True)
+    summary_rows.append({"step": "after_missing_target_removal", "rows": len(data)})
+
+    X = data.drop(columns=[target_col])
+    X_model = drop_irrelevant_columns(X, columns_to_drop=list(columns_to_drop))
+
+    available_categorical_cols = [column for column in categorical_cols if column in X_model.columns]
+    available_binary_missing_cols = [column for column in binary_missing_cols if column in X_model.columns]
+
+    X_encoded, artifacts = fit_feature_encoding(X_model, categorical_cols=available_categorical_cols, binary_missing_cols=available_binary_missing_cols, rare_min_count=rare_min_count, rare_label=rare_label)
+
+    artifacts["exchange_rate"] = exchange_rate
+    artifacts["text_cols"] = tuple(text_cols)
+    artifacts["columns_to_drop"] = list(columns_to_drop)
+    artifacts["target_col"] = target_col
+    artifacts["dev_columns_before_encoding"] = X_model.columns.tolist()
+
+    summary = pd.DataFrame(summary_rows)
+    summary["rows_removed_from_previous_step"] = summary["rows"].shift(1) - summary["rows"]
+    summary["rows_removed_from_previous_step"] = summary["rows_removed_from_previous_step"].fillna(0).astype(int)
+
+    return {"dataset_processed": data, "X": X, "X_model": X_model, "y": y, "X_encoded": X_encoded, "artifacts": artifacts, "summary": summary}
+
+
+def process_test(test_df, artifacts):
+    """
+    Applies the fitted development preprocessing pipeline to test data.
+
+    This function does not remove rows and does not learn new categories. It
+    only applies deterministic preprocessing and the fitted encoding artifacts.
+
+    Arguments:
+        test_df (pd.DataFrame): raw test dataset
+        artifacts (dict): artifacts returned by process_dev_dataset
+
+    Returns:
+        pd.DataFrame: encoded test features aligned to development columns
+    """
+    test_processed = preprocess_features(test_df, exchange_rate=artifacts.get("exchange_rate"), text_cols=artifacts.get("text_cols", ("Título", "Descripción", "Versión")))
+    test_model = drop_irrelevant_columns(test_processed, columns_to_drop=artifacts.get("columns_to_drop", []))
+    test_encoded = encode_features(test_model, artifacts=artifacts)
+
+    return test_encoded

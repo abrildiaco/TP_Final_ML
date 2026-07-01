@@ -59,12 +59,7 @@ def train_val_split_stratified(X, y, stratify_by, train_size = 0.80, random_stat
     rng = np.random.default_rng(random_state)
 
     # Convert stratification groups to clean string values so missing values form their own group
-    stratify_values = (
-        pd.Series(stratify_by)
-        .fillna("Unknown")
-        .astype(str)
-        .to_numpy()
-    )
+    stratify_values = ( pd.Series(stratify_by) .fillna("Unknown") .astype(str) .to_numpy())
 
     train_indices = []
     val_indices = []

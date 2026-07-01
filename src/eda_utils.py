@@ -151,9 +151,7 @@ def missing_values_summary(df, missing_values=("missing",)):
 
         if pd.api.types.is_object_dtype(series) or pd.api.types.is_string_dtype(series):
             # Normalize text columns so placeholder strings are caught by _build_missing_mask
-            series = series.apply(
-                lambda value: np.nan if pd.isna(value) else _normalize_category_text(value)
-            )
+            series = series.apply(lambda value: np.nan if pd.isna(value) else _normalize_category_text(value))
 
         missing_count = _build_missing_mask(series, extra_missing=missing_values).sum()
 
@@ -241,10 +239,7 @@ def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
         value_counts = df[column].dropna().astype(str).value_counts()
         categories = value_counts.index.tolist()
 
-        normalized_values = {
-            category: _normalize_category_text(category)
-            for category in categories
-        }
+        normalized_values = {category: _normalize_category_text(category) for category in categories}
 
         used_categories = set()
 
@@ -267,10 +262,7 @@ def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
                     used_categories.add(other_category)
 
             if len(group) > 1:
-                normalized_group = sorted({
-                    normalized_values[value]
-                    for value in group
-                })
+                normalized_group = sorted({normalized_values[value] for value in group})
 
                 rows.append({
                     "feature": column,
@@ -286,11 +278,7 @@ def find_semantic_repetitions(df, columns, similarity_threshold=0.7):
             "total_count", "n_values_grouped"
         ])
 
-    return (
-        pd.DataFrame(rows)
-        .sort_values(["feature", "total_count"], ascending=[True, False])
-        .reset_index(drop=True)
-    )
+    return (pd.DataFrame(rows) .sort_values(["feature", "total_count"], ascending=[True, False]) .reset_index(drop=True))
 
 
 def invert_category_map(category_map):
@@ -353,11 +341,7 @@ def count_category_mentions_in_text(df, target_col, text_cols, category_map, ign
             variant_to_category[variant_norm] = final_norm
 
     # Sort longer variants first so "marcha atras" is matched before "marcha"
-    variants = sorted(
-        variant_to_category,
-        key=lambda value: len(value.split()),
-        reverse=True
-    )
+    variants = sorted(variant_to_category, key=lambda value: len(value.split()), reverse=True)
 
     missing_col = f"{target_col}_is_missing"
     missing_target_mask = _build_missing_mask(df[target_col])
@@ -445,11 +429,7 @@ def frequent_words_table(df, text_cols, top_n=30, min_word_length=3, stop_words=
 
     word_counts = pd.Series(words).value_counts().head(top_n)
 
-    return (
-        word_counts
-        .reset_index()
-        .rename(columns={"index": "word", "count": "count"})
-    )
+    return (word_counts .reset_index() .rename(columns={"index": "word", "count": "count"}))
 
 
 def count_interest_terms_in_text(df, text_cols, terms_map):

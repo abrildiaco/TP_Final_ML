@@ -7,7 +7,7 @@ from sklearn.model_selection import KFold, train_test_split
 from sklearn.pipeline import Pipeline
 from xgboost import XGBRegressor
 
-import src.feature_engineering as fe
+import feature_engineering as fe
 import preprocessing as prep
 import constants as const
 
